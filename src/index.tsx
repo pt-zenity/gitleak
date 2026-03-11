@@ -695,6 +695,106 @@ app.get('/api/patterns', (c) => {
   )
 })
 
+// ─── Telegram Notification Helpers ───────────────────────────────────────────
+async function sendTelegram(botToken: string, chatId: string, text: string): Promise<{ ok: boolean; description?: string }> {
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      }),
+    })
+    const data: any = await res.json()
+    return { ok: data.ok === true, description: data.description }
+  } catch (e: any) {
+    return { ok: false, description: e?.message ?? 'Network error' }
+  }
+}
+
+function buildTelegramReport(findings: Finding[], meta: Record<string, any>): string {
+  const sevEmoji: Record<string, string> = { critical: '🔴', high: '🟠', medium: '🟡', low: '🟢' }
+  const counts = { critical: 0, high: 0, medium: 0, low: 0 } as Record<string, number>
+  findings.forEach(f => counts[f.severity] = (counts[f.severity] ?? 0) + 1)
+
+  const repoLabel = meta.repo ? `\n📦 <b>Target:</b> ${meta.repo}` : ''
+  const branchLabel = meta.branch ? ` (${meta.branch})` : ''
+  const platformLabel = meta.platform ? ` [${meta.platform}]` : ''
+
+  let msg = `🔍 <b>GitLeakHunter Scan Report</b>${repoLabel}${branchLabel}${platformLabel}\n`
+  msg += `📁 Files scanned: <b>${meta.scannedFiles ?? 1}</b>\n`
+  if (meta.commits) msg += `💾 Commits analyzed: <b>${meta.commits}</b>\n`
+  msg += `⏱ Elapsed: <b>${meta.elapsed}s</b>\n`
+  msg += `\n<b>📊 Summary:</b>\n`
+  msg += `${sevEmoji.critical} Critical: <b>${counts.critical}</b>   ${sevEmoji.high} High: <b>${counts.high}</b>   ${sevEmoji.medium} Medium: <b>${counts.medium}</b>   ${sevEmoji.low} Low: <b>${counts.low}</b>\n`
+  msg += `\n<b>Total findings: ${findings.length}</b>\n`
+
+  if (findings.length === 0) {
+    msg += `\n✅ No secrets detected. Repository looks clean!`
+    return msg
+  }
+
+  // Group by severity, show top 15 findings max
+  const sevOrder = ['critical', 'high', 'medium', 'low']
+  const sorted = [...findings].sort((a, b) => sevOrder.indexOf(a.severity) - sevOrder.indexOf(b.severity))
+  const shown = sorted.slice(0, 15)
+
+  msg += `\n<b>🚨 Findings (top ${shown.length}):</b>\n`
+  for (const f of shown) {
+    const redacted = f.match && f.match.length > 8
+      ? f.match.substring(0, 4) + '••••' + f.match.substring(f.match.length - 4)
+      : '***'
+    msg += `\n${sevEmoji[f.severity]} <b>${f.label}</b>\n`
+    msg += `   📄 <code>${f.file}</code> · line ${f.line}\n`
+    msg += `   🔑 <code>${redacted}</code>\n`
+  }
+
+  if (findings.length > 15) {
+    msg += `\n... and <b>${findings.length - 15}</b> more findings (export JSON for full report).`
+  }
+
+  return msg
+}
+
+// Test Telegram connection
+app.post('/api/telegram/test', async (c) => {
+  try {
+    const { botToken, chatId } = await c.req.json() as { botToken: string; chatId: string }
+    if (!botToken || !chatId) return c.json({ ok: false, error: 'botToken and chatId are required' }, 400)
+
+    const text = `✅ <b>GitLeakHunter</b> — Telegram connection test successful!\n\nYour notifications are configured correctly. Scan results will be sent to this chat.`
+    const result = await sendTelegram(botToken, chatId, text)
+    if (!result.ok) return c.json({ ok: false, error: result.description ?? 'Telegram API error' })
+    return c.json({ ok: true, message: 'Test message sent successfully!' })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message ?? 'Unknown error' }, 500)
+  }
+})
+
+// Send scan result to Telegram
+app.post('/api/telegram/notify', async (c) => {
+  try {
+    const { botToken, chatId, findings, meta } = await c.req.json() as {
+      botToken: string
+      chatId: string
+      findings: Finding[]
+      meta: Record<string, any>
+    }
+    if (!botToken || !chatId) return c.json({ ok: false, error: 'botToken and chatId are required' }, 400)
+    if (!Array.isArray(findings)) return c.json({ ok: false, error: 'findings array required' }, 400)
+
+    const text = buildTelegramReport(findings, meta ?? {})
+    const result = await sendTelegram(botToken, chatId, text)
+    if (!result.ok) return c.json({ ok: false, error: result.description ?? 'Telegram API error' })
+    return c.json({ ok: true, message: `Report sent (${findings.length} findings)` })
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message ?? 'Unknown error' }, 500)
+  }
+})
+
 // Favicon
 app.get('/favicon.ico', (c) => {
   // Simple SVG shield favicon as data
@@ -763,6 +863,16 @@ app.get('/', (c) => {
   .zip-progress-fill{transition:width 0.2s ease;}
   @keyframes file-pop{0%{opacity:0;transform:translateY(4px);}100%{opacity:1;transform:translateY(0);}}
   .file-pop{animation:file-pop 0.2s ease forwards;}
+  /* Telegram */
+  .tg-panel{background:rgba(13,17,23,0.97);border:1px solid rgba(41,182,246,0.25);box-shadow:0 0 40px rgba(41,182,246,0.08);}
+  .tg-input{background:#0d1117;border:1px solid #30363d;color:#fff;transition:border-color 0.2s;}
+  .tg-input:focus{outline:none;border-color:#29b6f6;box-shadow:0 0 0 2px rgba(41,182,246,0.15);}
+  .tg-toggle{width:44px;height:24px;background:#30363d;border-radius:12px;position:relative;cursor:pointer;transition:background 0.2s;}
+  .tg-toggle.on{background:#29b6f6;}
+  .tg-toggle::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform 0.2s;}
+  .tg-toggle.on::after{transform:translateX(20px);}
+  @keyframes tg-slide-in{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:translateY(0);}}
+  .tg-slide{animation:tg-slide-in 0.2s ease;}
 </style>
 </head>
 <body class="min-h-screen text-gray-100">
@@ -798,6 +908,73 @@ app.get('/', (c) => {
       <a href="#patterns-section" class="text-xs text-gray-400 hover:text-white transition-colors hidden sm:block">
         <i class="fas fa-list mr-1"></i>Pattern Library
       </a>
+      <button id="tg-settings-btn" onclick="toggleTgPanel()" 
+        class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium border border-[#30363d] text-gray-400 hover:text-[#29b6f6] hover:border-[#29b6f6]/40 transition-all">
+        <i class="fab fa-telegram text-sm"></i>
+        <span class="hidden sm:inline">Telegram</span>
+        <span id="tg-dot" class="hidden w-2 h-2 bg-[#29b6f6] rounded-full pulse-dot"></span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Telegram Settings Panel -->
+  <div id="tg-panel" class="hidden tg-panel tg-slide border-t border-[#29b6f6]/20">
+    <div class="max-w-7xl mx-auto px-4 py-4">
+      <div class="flex flex-wrap items-start gap-6">
+        <!-- Left: Title -->
+        <div class="flex items-center gap-3 min-w-[180px]">
+          <div class="w-9 h-9 rounded-xl bg-[#29b6f6]/10 border border-[#29b6f6]/20 flex items-center justify-center shrink-0">
+            <i class="fab fa-telegram text-[#29b6f6] text-lg"></i>
+          </div>
+          <div>
+            <p class="text-sm font-semibold text-white">Telegram Notify</p>
+            <p class="text-xs text-gray-500">Send scan results to chat</p>
+          </div>
+        </div>
+        <!-- Middle: Inputs -->
+        <div class="flex flex-wrap gap-3 flex-1">
+          <div class="flex flex-col gap-1 min-w-[200px] flex-1">
+            <label class="text-xs text-gray-500 font-medium">Bot Token</label>
+            <input id="tg-bot-token" type="password" placeholder="1234567890:ABCdefGHI..." 
+              class="tg-input rounded-lg px-3 py-2 text-sm mono w-full"
+              oninput="saveTgConfig()"/>
+          </div>
+          <div class="flex flex-col gap-1 min-w-[140px]">
+            <label class="text-xs text-gray-500 font-medium">Chat ID</label>
+            <input id="tg-chat-id" type="text" placeholder="-1001234567890" 
+              class="tg-input rounded-lg px-3 py-2 text-sm mono w-full"
+              oninput="saveTgConfig()"/>
+          </div>
+        </div>
+        <!-- Right: Controls -->
+        <div class="flex flex-wrap items-center gap-3">
+          <!-- Auto-notify toggle -->
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-gray-400">Auto-notify</span>
+            <div id="tg-auto-toggle" class="tg-toggle" onclick="toggleAutoNotify()" title="Auto-send after every scan"></div>
+          </div>
+          <!-- Test button -->
+          <button id="tg-test-btn" onclick="testTelegram()"
+            class="flex items-center gap-1.5 px-4 py-2 bg-[#29b6f6]/10 hover:bg-[#29b6f6]/20 border border-[#29b6f6]/30 hover:border-[#29b6f6]/60 text-[#29b6f6] text-xs font-medium rounded-lg transition-all">
+            <i class="fas fa-paper-plane"></i> Test
+          </button>
+          <!-- Send now button (only visible when there are results) -->
+          <button id="tg-send-now-btn" onclick="sendResultsToTelegram()" 
+            class="hidden items-center gap-1.5 px-4 py-2 bg-[#29b6f6] hover:bg-[#0ea5e9] text-white text-xs font-semibold rounded-lg transition-all shadow-lg hover:shadow-[#29b6f6]/25">
+            <i class="fas fa-share"></i> Send Results
+          </button>
+        </div>
+      </div>
+      <!-- Status message -->
+      <div id="tg-status" class="hidden mt-3 text-xs rounded-lg px-3 py-2"></div>
+      <!-- Help hint -->
+      <p class="mt-2 text-xs text-gray-700">
+        <i class="fas fa-circle-info mr-1"></i>
+        Create a bot via <a href="https://t.me/BotFather" target="_blank" class="text-[#29b6f6]/60 hover:text-[#29b6f6]">@BotFather</a> · 
+        Get Chat ID via <a href="https://t.me/userinfobot" target="_blank" class="text-[#29b6f6]/60 hover:text-[#29b6f6]">@userinfobot</a> or add 
+        <a href="https://t.me/getmyid_bot" target="_blank" class="text-[#29b6f6]/60 hover:text-[#29b6f6]">@getmyid_bot</a> to your group · 
+        Config saved in localStorage
+      </p>
     </div>
   </div>
 </header>
@@ -1111,6 +1288,156 @@ let currentTab = 'github';
 let scannedFilename = 'pasted-content';
 let allPatterns = [];
 
+// ─── Telegram Config ──────────────────────────────────────────────────────────
+let tgConfig = { botToken: '', chatId: '', autoNotify: false };
+
+function loadTgConfig(){
+  try {
+    const saved = localStorage.getItem('gitleakhunter_tg');
+    if(saved) tgConfig = { ...tgConfig, ...JSON.parse(saved) };
+  } catch {}
+  const tokenEl = document.getElementById('tg-bot-token');
+  const chatEl  = document.getElementById('tg-chat-id');
+  if(tokenEl) tokenEl.value = tgConfig.botToken || '';
+  if(chatEl)  chatEl.value  = tgConfig.chatId  || '';
+  updateTgToggleUI();
+  updateTgDot();
+}
+
+function saveTgConfig(){
+  tgConfig.botToken = document.getElementById('tg-bot-token').value.trim();
+  tgConfig.chatId   = document.getElementById('tg-chat-id').value.trim();
+  localStorage.setItem('gitleakhunter_tg', JSON.stringify(tgConfig));
+  updateTgDot();
+}
+
+function updateTgDot(){
+  const dot = document.getElementById('tg-dot');
+  if(!dot) return;
+  if(tgConfig.botToken && tgConfig.chatId){
+    dot.classList.remove('hidden');
+  } else {
+    dot.classList.add('hidden');
+  }
+}
+
+function updateTgToggleUI(){
+  const tog = document.getElementById('tg-auto-toggle');
+  if(!tog) return;
+  tog.classList.toggle('on', !!tgConfig.autoNotify);
+}
+
+function toggleTgPanel(){
+  const panel = document.getElementById('tg-panel');
+  panel.classList.toggle('hidden');
+  if(!panel.classList.contains('hidden')){
+    panel.classList.add('tg-slide');
+    setTimeout(() => panel.classList.remove('tg-slide'), 300);
+    loadTgConfig();
+  }
+}
+
+function toggleAutoNotify(){
+  tgConfig.autoNotify = !tgConfig.autoNotify;
+  localStorage.setItem('gitleakhunter_tg', JSON.stringify(tgConfig));
+  updateTgToggleUI();
+  showTgStatus(tgConfig.autoNotify ? '✅ Auto-notify enabled — results will be sent after each scan' : '🔕 Auto-notify disabled', tgConfig.autoNotify ? 'success' : 'info');
+}
+
+function showTgStatus(msg, type='success'){
+  const el = document.getElementById('tg-status');
+  if(!el) return;
+  const colors = { success:'text-green-400 bg-green-500/10 border border-green-500/20', error:'text-red-400 bg-red-500/10 border border-red-500/20', info:'text-blue-400 bg-blue-500/10 border border-blue-500/20', loading:'text-gray-300 bg-gray-500/10 border border-gray-500/20' };
+  el.className = 'mt-3 text-xs rounded-lg px-3 py-2 ' + (colors[type] || colors.info);
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  if(type !== 'loading') setTimeout(() => el.classList.add('hidden'), 5000);
+}
+
+async function testTelegram(){
+  const token = document.getElementById('tg-bot-token').value.trim();
+  const chatId = document.getElementById('tg-chat-id').value.trim();
+  if(!token || !chatId){
+    showTgStatus('⚠️ Please enter Bot Token and Chat ID first', 'error'); return;
+  }
+  const btn = document.getElementById('tg-test-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-circle-notch spinner"></i> Testing...';
+  showTgStatus('⏳ Sending test message to Telegram...', 'loading');
+  try {
+    const resp = await fetch('/api/telegram/test', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ botToken: token, chatId })
+    });
+    const data = await resp.json();
+    if(data.ok){
+      showTgStatus('✅ ' + data.message, 'success');
+      // Save config after successful test
+      tgConfig.botToken = token;
+      tgConfig.chatId = chatId;
+      localStorage.setItem('gitleakhunter_tg', JSON.stringify(tgConfig));
+      updateTgDot();
+    } else {
+      showTgStatus('❌ ' + (data.error || 'Telegram API error'), 'error');
+    }
+  } catch(e){
+    showTgStatus('❌ Network error: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-paper-plane"></i> Test';
+  }
+}
+
+async function sendResultsToTelegram(autoMode=false){
+  if(!scanResults) {
+    if(!autoMode) showTgStatus('⚠️ No scan results to send yet', 'error');
+    return;
+  }
+  const token = tgConfig.botToken;
+  const chatId = tgConfig.chatId;
+  if(!token || !chatId){
+    if(!autoMode){
+      // open panel if closed
+      const panel = document.getElementById('tg-panel');
+      if(panel.classList.contains('hidden')) toggleTgPanel();
+      showTgStatus('⚠️ Please configure Bot Token and Chat ID first', 'error');
+    }
+    return;
+  }
+  const sendBtn = document.getElementById('tg-send-now-btn');
+  if(sendBtn){ sendBtn.disabled=true; sendBtn.innerHTML='<i class="fas fa-circle-notch spinner"></i> Sending...'; }
+  if(!autoMode) showTgStatus('⏳ Sending report to Telegram...', 'loading');
+  try {
+    const resp = await fetch('/api/telegram/notify', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ botToken: token, chatId, findings: scanResults.findings, meta: scanResults.meta })
+    });
+    const data = await resp.json();
+    if(data.ok){
+      const msg = '✅ ' + data.message;
+      showTgStatus(msg, 'success');
+      if(autoMode) showToast('📨 ' + data.message + ' (Telegram)', 'success');
+    } else {
+      showTgStatus('❌ ' + (data.error || 'Failed to send'), 'error');
+    }
+  } catch(e){
+    showTgStatus('❌ Network error: ' + e.message, 'error');
+  } finally {
+    if(sendBtn){ sendBtn.disabled=false; sendBtn.innerHTML='<i class="fas fa-share"></i> Send Results'; }
+  }
+}
+
+function showSendNowBtn(){
+  const btn = document.getElementById('tg-send-now-btn');
+  if(btn) btn.classList.replace('hidden','flex');
+}
+
+function maybeAutoNotify(){
+  if(tgConfig.autoNotify && tgConfig.botToken && tgConfig.chatId){
+    sendResultsToTelegram(true);
+  }
+}
+
 // ─── Matrix rain background ────────────────────────────────────────────────────
 (function initMatrix(){
   const canvas = document.getElementById('matrix');
@@ -1374,6 +1701,8 @@ async function startZipScan(){
     data.meta.zipName = zipRawFile ? zipRawFile.name : 'archive.zip';
     scanResults = data;
     renderZipResults(data);
+    showSendNowBtn();
+    maybeAutoNotify();
   } catch(e){
     clearInterval(iv);
     hideProgress();
@@ -1528,6 +1857,8 @@ async function startGithubScan(){
     
     scanResults = data;
     renderResults(data);
+    showSendNowBtn();
+    maybeAutoNotify();
   } catch(e){
     clearInterval(progressInterval);
     hideProgress();
@@ -1562,6 +1893,8 @@ async function startTextScan(){
     
     scanResults = data;
     renderResults(data);
+    showSendNowBtn();
+    maybeAutoNotify();
   } catch(e){
     hideProgress();
     showError(e.message);
@@ -1831,6 +2164,7 @@ document.getElementById('github-url').addEventListener('keydown', e => { if(e.ke
 
 // Init
 loadPatterns();
+loadTgConfig();
 </script>
 </body>
 </html>`)
