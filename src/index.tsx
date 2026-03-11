@@ -455,7 +455,7 @@ const HIGH_VALUE_PATHS = /(\.(env|pem|key|p12|pfx|jks|cer|crt)|\.env\.|id_rsa|id
 
 const SCAN_EXTENSIONS = /\.(env|json|yaml|yml|toml|ini|cfg|conf|config|properties|xml|sh|bash|zsh|py|js|ts|jsx|tsx|rb|go|php|java|cs|cpp|c|h|tf|tfvars|pem|key|crt|cer|p12|pfx|jks|txt|md|gradle|htpasswd|npmrc|netrc|gitcredentials)$/i
 const SKIP_DIRS       = /^(node_modules|\.git|dist|build|vendor|\.next|\.nuxt|coverage|__pycache__|\.venv|venv|\.cache|\.parcel-cache|target|out|\.gradle|\.mvn)\//
-const MAX_FILES       = 250
+const MAX_FILES       = 3000
 const MAX_COMMITS     = 100
 const MAX_FILE_SIZE   = 150_000  // skip files > 150 KB (too large to be a secret file)
 
@@ -633,7 +633,7 @@ app.post('/api/scan/zip', async (c) => {
     const body = await c.req.json() as { files: { name: string; content: string }[] }
     if (!body?.files?.length) return c.json({ error: 'No files provided' }, 400)
 
-    const MAX_FILES  = 300
+    const MAX_FILES  = 3000
     const MAX_BYTES  = 500_000          // skip files > 500 KB
     const startTime  = Date.now()
     const allFindings: Finding[] = []
@@ -1067,7 +1067,7 @@ app.get('/', (c) => {
       </div>
       <p class="text-xs text-gray-600 mt-2">
         <i class="fas fa-info-circle mr-1"></i>
-        Scans up to 250 source files + 100 recent commits. High-value files (env, keys, certs) prioritised. No auth required for public repos.
+        Scans up to 3000 source files + 100 recent commits. High-value files (env, keys, certs) prioritised. No auth required for public repos.
       </p>
       <!-- Example repos -->
       <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -1114,7 +1114,7 @@ app.get('/', (c) => {
           <p class="text-gray-500 text-sm mb-3">Supports .zip, .jar, .war, .ear, .apk, .ipa</p>
           <div class="flex flex-wrap justify-center gap-3 text-xs text-gray-600">
             <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> Max 1000 MB</span>
-            <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> Up to 300 files scanned</span>
+            <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> Up to 3000 files scanned</span>
             <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> All secret patterns</span>
             <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> Entire directory tree</span>
           </div>
@@ -1572,7 +1572,7 @@ async function processZipFile(file){
     const DOTFILE   = new RegExp('^.*(\\.(env|npmrc|netrc|gitconfig|htpasswd|bashrc|zshrc|credentials|secrets))$', 'i');
     const BINARY_EXT = new RegExp('\\.(png|jpg|jpeg|gif|ico|bmp|svg|woff|woff2|ttf|eot|otf|mp4|mp3|wav|avi|mov|pdf|docx|xlsx|pptx|class|pyc|so|dll|exe|bin|zip|tar|gz|7z|rar|jar|war)$', 'i');
     const MAX_FILE_BYTES = 500000;
-    const MAX_SCAN = 300;
+    const MAX_SCAN = 3000;
 
     const scannable = allEntries.filter(({path}) =>
       !SKIP_PATH.test(path) &&
