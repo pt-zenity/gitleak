@@ -837,6 +837,8 @@ app.get('/', (c) => {
   .severity-low{border-left-color:#3fb950!important;background:rgba(63,185,80,0.05);}
   .tab-btn.active{background:rgba(88,166,255,0.15);border-color:#58a6ff;color:#58a6ff;}
   .copy-btn:active{transform:scale(0.95);}
+  .copy-btn.copied{color:#4ade80 !important;border-color:rgba(74,222,128,0.4) !important;}
+  .copy-group{display:flex;align-items:center;gap:0.375rem;flex-wrap:wrap;}
   .progress-bar{transition:width 0.3s ease;}
   .hero-gradient{background:linear-gradient(135deg,rgba(13,17,23,1) 0%,rgba(22,27,34,1) 50%,rgba(13,17,23,1) 100%);}
   .badge-critical{background:rgba(248,81,73,0.15);color:#f85149;border:1px solid rgba(248,81,73,0.3);}
@@ -873,6 +875,17 @@ app.get('/', (c) => {
   .tg-toggle.on::after{transform:translateX(20px);}
   @keyframes tg-slide-in{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:translateY(0);}}
   .tg-slide{animation:tg-slide-in 0.2s ease;}
+  /* Folder / Android Scan */
+  .folder-drop{border:2px dashed #30363d;transition:all 0.25s ease;}
+  .folder-drop.drag-over{border-color:#22c55e;background:rgba(34,197,94,0.06);box-shadow:0 0 20px rgba(34,197,94,0.12);}
+  .folder-drop:hover{border-color:#484f58;}
+  .android-profile{border:1px solid #30363d;cursor:pointer;transition:all 0.2s;}
+  .android-profile:hover{border-color:#22c55e;background:rgba(34,197,94,0.06);}
+  .android-profile.selected{border-color:#22c55e;background:rgba(34,197,94,0.1);box-shadow:0 0 12px rgba(34,197,94,0.15);}
+  .folder-file-item{transition:background 0.15s;}
+  .folder-file-item:hover{background:rgba(255,255,255,0.03);}
+  @keyframes count-up{from{opacity:0;transform:scale(0.8);}to{opacity:1;transform:scale(1);}}
+  .count-up{animation:count-up 0.3s ease;}
 </style>
 </head>
 <body class="min-h-screen text-gray-100">
@@ -1032,6 +1045,12 @@ app.get('/', (c) => {
       <button id="tab-zip" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-[#30363d] text-gray-400 hover:text-white transition-all" onclick="switchTab('zip')">
         <i class="fas fa-file-zipper"></i> ZIP Upload
       </button>
+      <button id="tab-folder" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-[#30363d] text-gray-400 hover:text-white transition-all" onclick="switchTab('folder')">
+        <i class="fas fa-folder-open"></i> Folder Scan
+      </button>
+      <button id="tab-android" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-[#30363d] text-gray-400 hover:text-white transition-all" onclick="switchTab('android')">
+        <i class="fab fa-android"></i> Android Scan
+      </button>
       <button id="tab-text" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-[#30363d] text-gray-400 hover:text-white transition-all" onclick="switchTab('text')">
         <i class="fas fa-code"></i> Paste Code
       </button>
@@ -1163,6 +1182,156 @@ app.get('/', (c) => {
 
     <!-- Text/File Tab -->
     <div id="panel-text" class="hidden">
+      <!-- Folder Scan Tab -->
+    <div id="panel-folder" class="hidden">
+      <label class="block text-sm font-medium text-gray-300 mb-3">
+        <i class="fas fa-folder-open mr-2 text-green-400"></i>Folder / Directory Scan
+      </label>
+      <p class="text-xs text-gray-500 mb-4">
+        <i class="fas fa-circle-info mr-1 text-green-400/60"></i>
+        Select any folder from your device — all supported files inside will be read and scanned locally in the browser. Works on desktop and Android file managers that support folder selection.
+      </p>
+
+      <!-- Folder picker area -->
+      <div id="folder-drop-zone"
+        class="folder-drop rounded-2xl px-6 py-10 text-center cursor-pointer relative"
+        onclick="document.getElementById('folder-file-input').click()"
+        ondragover="handleFolderDragOver(event)"
+        ondragleave="handleFolderDragLeave(event)"
+        ondrop="handleFolderDrop(event)">
+        <input id="folder-file-input" type="file" class="hidden" webkitdirectory multiple onchange="handleFolderSelect(event)"/>
+        <div id="folder-idle-state">
+          <div class="w-16 h-16 rounded-2xl bg-green-500/10 border border-green-500/20 flex items-center justify-center mx-auto mb-4">
+            <i class="fas fa-folder-open text-green-400 text-3xl"></i>
+          </div>
+          <p class="text-white font-semibold mb-1">Click to select folder or drag & drop</p>
+          <p class="text-gray-500 text-sm mb-3">Reads all files recursively from the selected folder</p>
+          <div class="flex flex-wrap justify-center gap-4 text-xs text-gray-600">
+            <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> No upload — 100% local</span>
+            <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> Recursive subfolders</span>
+            <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> Up to 500 files</span>
+            <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> All 33 patterns</span>
+          </div>
+        </div>
+        <div id="folder-loaded-state" class="hidden">
+          <div class="w-14 h-14 rounded-xl bg-green-500/10 border border-green-500/20 flex items-center justify-center mx-auto mb-3">
+            <i class="fas fa-circle-check text-green-400 text-2xl"></i>
+          </div>
+          <p class="text-white font-semibold mb-1" id="folder-name-label">folder</p>
+          <p class="text-gray-500 text-sm" id="folder-info-label">0 scannable files</p>
+          <button onclick="resetFolder(event)" class="mt-3 text-xs text-gray-500 hover:text-red-400 transition-colors">
+            <i class="fas fa-xmark mr-1"></i>Change folder
+          </button>
+        </div>
+      </div>
+
+      <!-- Stats row (hidden until loaded) -->
+      <div id="folder-stats-row" class="hidden mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="glass rounded-xl p-3 text-center">
+          <div class="text-xl font-black text-white count-up" id="fstat-total">0</div>
+          <div class="text-xs text-gray-500 mt-0.5">Total files</div>
+        </div>
+        <div class="glass rounded-xl p-3 text-center">
+          <div class="text-xl font-black text-green-400 count-up" id="fstat-scannable">0</div>
+          <div class="text-xs text-gray-500 mt-0.5">Scannable</div>
+        </div>
+        <div class="glass rounded-xl p-3 text-center">
+          <div class="text-xl font-black text-yellow-400 count-up" id="fstat-skipped">0</div>
+          <div class="text-xs text-gray-500 mt-0.5">Skipped</div>
+        </div>
+        <div class="glass rounded-xl p-3 text-center">
+          <div class="text-xl font-black text-blue-400 count-up" id="fstat-size">0 KB</div>
+          <div class="text-xs text-gray-500 mt-0.5">Total size</div>
+        </div>
+      </div>
+
+      <!-- File tree + scan button -->
+      <div id="folder-tree-section" class="hidden mt-4">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-medium text-gray-400 uppercase tracking-wide flex items-center gap-1.5">
+            <i class="fas fa-folder-tree text-green-400"></i>Files to Scan
+          </span>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-gray-600" id="folder-tree-counts"></span>
+            <button id="scan-folder-btn" onclick="startFolderScan()"
+              class="flex items-center gap-2 px-5 py-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white text-sm font-semibold rounded-xl transition-all shadow-lg hover:shadow-green-500/25">
+              <i class="fas fa-shield-halved"></i> Scan Folder
+            </button>
+          </div>
+        </div>
+        <div id="folder-file-tree" class="terminal-bg rounded-xl p-3 max-h-52 overflow-y-auto text-xs mono space-y-0.5"></div>
+      </div>
+    </div>
+
+    <!-- Android Scan Tab -->
+    <div id="panel-android" class="hidden">
+      <label class="block text-sm font-medium text-gray-300 mb-1">
+        <i class="fab fa-android mr-2 text-green-400"></i>Android Device / Storage Scan
+      </label>
+      <p class="text-xs text-gray-500 mb-4">
+        <i class="fas fa-circle-info mr-1 text-green-400/60"></i>
+        Select your Android device's storage folder from your PC (via USB/MTP), or browse the Android file manager on-device. 
+        Choose a scan profile below or select any folder manually.
+      </p>
+
+      <!-- Scan Profiles -->
+      <div class="mb-5">
+        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3 flex items-center gap-2">
+          <i class="fas fa-sliders text-green-400"></i>Quick Scan Profiles
+        </p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3" id="android-profiles-grid">
+          <!-- profiles rendered by JS -->
+        </div>
+      </div>
+
+      <!-- Manual folder picker -->
+      <div class="glass rounded-xl p-4 mb-4">
+        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3 flex items-center gap-2">
+          <i class="fas fa-folder-plus text-green-400"></i>Or Select Folder Manually
+        </p>
+        <div class="flex items-center gap-3">
+          <div id="android-folder-drop"
+            class="folder-drop flex-1 rounded-xl px-4 py-3 flex items-center gap-3 cursor-pointer"
+            onclick="document.getElementById('android-folder-input').click()">
+            <input id="android-folder-input" type="file" class="hidden" webkitdirectory multiple onchange="handleAndroidFolderSelect(event)"/>
+            <i class="fas fa-folder-open text-green-400 text-lg shrink-0"></i>
+            <div>
+              <p class="text-sm text-white font-medium" id="android-folder-label">Click to select Android folder</p>
+              <p class="text-xs text-gray-500" id="android-folder-sub">Connect phone via USB/MTP or use Android file manager</p>
+            </div>
+          </div>
+          <button id="scan-android-btn" onclick="startAndroidScan()" class="hidden flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white text-sm font-semibold rounded-xl transition-all shadow-lg hover:shadow-green-500/25">
+            <i class="fas fa-shield-halved"></i> Scan
+          </button>
+        </div>
+      </div>
+
+      <!-- File tree after selection -->
+      <div id="android-tree-section" class="hidden mt-2">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-medium text-gray-400 uppercase tracking-wide flex items-center gap-1.5">
+            <i class="fab fa-android text-green-400"></i>Detected Files
+            <span class="text-gray-600 font-normal normal-case" id="android-profile-badge"></span>
+          </span>
+          <span class="text-xs text-gray-600" id="android-tree-counts"></span>
+        </div>
+        <div id="android-file-tree" class="terminal-bg rounded-xl p-3 max-h-52 overflow-y-auto text-xs mono space-y-0.5"></div>
+      </div>
+
+      <!-- Android Tips -->
+      <div class="mt-4 glass rounded-xl p-4 border border-green-500/10">
+        <p class="text-xs font-semibold text-gray-400 mb-2 flex items-center gap-2"><i class="fas fa-lightbulb text-yellow-400"></i>Tips for Android Scanning</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-500">
+          <div class="flex items-start gap-2"><i class="fas fa-usb text-blue-400 mt-0.5 shrink-0"></i><span><b class="text-gray-400">USB/MTP:</b> Connect phone → enable file transfer → open phone storage in file manager → select folder</span></div>
+          <div class="flex items-start gap-2"><i class="fab fa-android text-green-400 mt-0.5 shrink-0"></i><span><b class="text-gray-400">On-device:</b> Open browser → tap Folder Scan tab → select storage folder from file picker</span></div>
+          <div class="flex items-start gap-2"><i class="fas fa-folder text-yellow-400 mt-0.5 shrink-0"></i><span><b class="text-gray-400">Key paths:</b> <code class="bg-[#21262d] px-1 rounded">/sdcard/</code>, <code class="bg-[#21262d] px-1 rounded">/storage/emulated/0/</code></span></div>
+          <div class="flex items-start gap-2"><i class="fas fa-shield-halved text-red-400 mt-0.5 shrink-0"></i><span><b class="text-gray-400">Scans for:</b> tokens in apps, backup files, config JSONs, .env files, private keys</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Text/File Tab original placeholder (kept) -->
+    <div id="panel-text-inner">
       <label class="block text-sm font-medium text-gray-300 mb-2">
         <i class="fas fa-file-code mr-2 text-gray-400"></i>Paste Code or File Content
       </label>
@@ -1226,9 +1395,14 @@ app.get('/', (c) => {
         <button onclick="filterSeverity('medium')" id="f-medium" class="sev-filter px-3 py-1 rounded-lg text-xs font-medium bg-[#21262d] border border-[#30363d] text-gray-400 hover:text-white transition-colors">🟡 Medium</button>
         <button onclick="filterSeverity('low')" id="f-low" class="sev-filter px-3 py-1 rounded-lg text-xs font-medium bg-[#21262d] border border-[#30363d] text-gray-400 hover:text-white transition-colors">🟢 Low</button>
       </div>
-      <button onclick="exportResults()" class="flex items-center gap-1.5 px-3 py-1.5 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-gray-300 text-xs rounded-lg transition-colors">
-        <i class="fas fa-download"></i> Export JSON
-      </button>
+      <div class="flex items-center gap-2">
+        <button onclick="copyAllFindings()" class="copy-btn flex items-center gap-1.5 px-3 py-1.5 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-blue-400 hover:text-blue-300 text-xs rounded-lg transition-colors" title="Copy all visible findings as plain text">
+          <i class="fas fa-copy"></i> Copy All
+        </button>
+        <button onclick="exportResults()" class="flex items-center gap-1.5 px-3 py-1.5 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] text-gray-300 text-xs rounded-lg transition-colors">
+          <i class="fas fa-download"></i> Export JSON
+        </button>
+      </div>
     </div>
 
     <!-- Findings list -->
@@ -2010,7 +2184,10 @@ function renderFindings(){
           \${getFileIcon(file)}
           <span class="text-sm font-medium text-gray-200 mono truncate">\${escHtml(file)}</span>
         </div>
-        <span class="text-xs text-gray-500 ml-3 shrink-0">\${fileFindings.length} finding\${fileFindings.length>1?'s':''}</span>
+        <div class="flex items-center gap-3 ml-3 shrink-0">
+          <span class="text-xs text-gray-500">\${fileFindings.length} finding\${fileFindings.length>1?'s':''}</span>
+          <button onclick="copyFileFindings(\${JSON.stringify(file)})" class="copy-btn text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 px-2 py-0.5 rounded border border-[#30363d] hover:border-[#484f58] transition-all" title="Copy all findings from this file"><i class="fas fa-copy text-xs"></i> Copy file</button>
+        </div>
       </div>
       <div class="divide-y divide-[#30363d]">
         \${fileFindings.map(f => findingCard(f)).join('')}
@@ -2020,10 +2197,12 @@ function renderFindings(){
 }
 
 function findingCard(f){
-  const sevColors = { critical:'red-500', high:'orange-400', medium:'yellow-400', low:'green-400' };
   const sevBg = { critical:'severity-critical', high:'severity-high', medium:'severity-medium', low:'severity-low' };
   const redacted = redactSecret(f.match);
-  
+  const copySecret  = f.match || '';
+  const copySnippet = f.snippet || '';
+  const copyFull    = '[' + f.severity.toUpperCase() + '] ' + f.label + ' | File: ' + f.file + ' (line ' + f.line + ') | Category: ' + f.category + ' | Matched: ' + f.match + ' | Snippet: ' + f.snippet;
+
   return \`
     <div class="finding-card \${sevBg[f.severity]} px-4 py-3">
       <div class="flex items-start gap-3">
@@ -2036,20 +2215,24 @@ function findingCard(f){
             \${f.line > 0 ? \`<span class="text-xs text-gray-600 mono">line \${f.line}</span>\` : ''}
           </div>
           <p class="text-xs text-gray-500 mb-2">\${escHtml(f.description)}</p>
-          <div class="terminal-bg rounded-lg px-3 py-2 mono text-xs overflow-x-auto whitespace-pre-wrap text-gray-300">\${f.context ? escHtml(f.context) : (f.line > 0 ? f.line + ' │ ' : '') + escHtml(f.snippet)}</div>
-          <div class="mt-2 flex items-center gap-2">
-            <span class="text-xs text-gray-600">Matched:</span>
-            <code class="text-xs text-red-400 bg-red-500/10 px-2 py-0.5 rounded mono">\${escHtml(redacted)}</code>
-            <button onclick="copyToClipboard(\${JSON.stringify(f.match)})" class="copy-btn text-xs text-gray-500 hover:text-gray-300 transition-colors ml-auto">
-              <i class="fas fa-copy mr-1"></i>Copy
-            </button>
+          <div class="terminal-bg rounded-lg px-3 py-2 mono text-xs overflow-x-auto whitespace-pre-wrap text-gray-300 relative group/snippet">
+            \${f.context ? escHtml(f.context) : (f.line > 0 ? f.line + ' │ ' : '') + escHtml(f.snippet)}
+            <button onclick="copyWithFeedback(this,\${JSON.stringify(copySnippet)})" class="copy-btn absolute top-1.5 right-1.5 opacity-0 group-hover/snippet:opacity-100 text-xs text-gray-500 hover:text-gray-200 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] px-2 py-0.5 rounded transition-all" title="Copy snippet"><i class="fas fa-copy"></i></button>
+          </div>
+          <div class="mt-2 flex items-center gap-2 flex-wrap">
+            <span class="text-xs text-gray-600 shrink-0">Matched:</span>
+            <code class="text-xs text-red-400 bg-red-500/10 px-2 py-0.5 rounded mono flex-1 min-w-0 truncate" title="\${escHtml(f.match)}">\${escHtml(redacted)}</code>
+            <div class="copy-group">
+              <button onclick="copyWithFeedback(this,\${JSON.stringify(copySecret)})" class="copy-btn flex items-center gap-1 text-xs text-red-400 hover:text-red-300 bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 hover:border-red-500/40 px-2 py-0.5 rounded transition-all" title="Copy full secret value"><i class="fas fa-key text-xs"></i><span>Secret</span></button>
+              <button onclick="copyWithFeedback(this,\${JSON.stringify(copySnippet)})" class="copy-btn flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] px-2 py-0.5 rounded transition-all" title="Copy snippet line"><i class="fas fa-code text-xs"></i><span>Line</span></button>
+              <button onclick="copyWithFeedback(this,\${JSON.stringify(copyFull)})" class="copy-btn flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] px-2 py-0.5 rounded transition-all" title="Copy full finding details"><i class="fas fa-file-lines text-xs"></i><span>Full</span></button>
+            </div>
           </div>
         </div>
       </div>
     </div>
   \`;
 }
-
 function getFileIcon(file){
   if(file.startsWith('[commit:')) return '<i class="fas fa-code-commit text-purple-400 text-sm shrink-0"></i>';
   if(file.match(/\\.env/i)) return '<i class="fas fa-gear text-yellow-400 text-sm shrink-0"></i>';
@@ -2104,6 +2287,54 @@ function escHtml(s){
 
 function copyToClipboard(text){
   navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard', 'success')).catch(() => {});
+}
+
+// Copy with visual feedback on the button itself
+function copyWithFeedback(btn, text){
+  navigator.clipboard.writeText(text).then(() => {
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-check"></i>';
+    btn.classList.add('copied');
+    showToast('Copied!', 'success');
+    setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 1500);
+  }).catch(() => {
+    // Fallback for older browsers
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); showToast('Copied!', 'success'); } catch {}
+    document.body.removeChild(ta);
+  });
+}
+
+// Copy all findings from a specific file
+function copyFileFindings(filename){
+  if(!scanResults) return;
+  const fileFindings = scanResults.findings.filter(f => f.file === filename);
+  if(!fileFindings.length){ showToast('No findings for this file', 'error'); return; }
+  const text = fileFindings.map(f =>
+    '[' + f.severity.toUpperCase() + '] ' + f.label + ' | File: ' + f.file + ' (line ' + f.line + ') | Category: ' + f.category + ' | Matched: ' + f.match + ' | Snippet: ' + f.snippet
+  ).join('\\n---\\n');
+  navigator.clipboard.writeText(text).then(() => showToast('Copied ' + fileFindings.length + ' finding(s) from ' + filename, 'success')).catch(() => {});
+}
+
+// Copy ALL visible findings as plain text
+function copyAllFindings(){
+  if(!scanResults) return;
+  const filterText = document.getElementById('filter-input').value.toLowerCase();
+  let filtered = scanResults.findings.filter(f => {
+    if(currentSeverityFilter !== 'all' && f.severity !== currentSeverityFilter) return false;
+    if(filterText && !f.file.toLowerCase().includes(filterText) && !f.category.toLowerCase().includes(filterText) && !f.label.toLowerCase().includes(filterText)) return false;
+    return true;
+  });
+  if(!filtered.length){ showToast('No findings to copy', 'error'); return; }
+  const sep = '='.repeat(60);
+  const repo = (scanResults.meta && scanResults.meta.repo) ? scanResults.meta.repo : 'unknown';
+  const header = 'GitLeakHunter Scan Report - ' + repo + ' | Total: ' + filtered.length + ' findings | ' + sep + ' ';
+  const text = header + filtered.map(function(f,i){
+    return '#' + (i+1) + ' [' + f.severity.toUpperCase() + '] ' + f.label + ' | File: ' + f.file + ' (line ' + f.line + ') | Category: ' + f.category + ' | Matched: ' + f.match + ' | Snippet: ' + f.snippet;
+  }).join('\\n---\\n');
+  navigator.clipboard.writeText(text).then(() => showToast('Copied ' + filtered.length + ' findings to clipboard', 'success')).catch(() => {});
 }
 
 function showToast(msg, type='success'){
