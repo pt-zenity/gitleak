@@ -459,30 +459,45 @@ const MAX_FILES       = Infinity
 const MAX_COMMITS     = 100
 const MAX_FILE_SIZE   = 150_000  // skip files > 150 KB (too large to be a secret file)
 
-async function fetchGithubTree(owner: string, repo: string): Promise<{ path: string; url: string; size: number }[]> {
-  // Fetch repo info + tree in PARALLEL for speed
+// Fetch with timeout — prevents indefinitely stalled requests from hanging the scan
+async function fetchWithTimeout(url: string, opts: RequestInit = {}, timeoutMs = 15000): Promise<Response> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function fetchGithubTree(owner: string, repo: string): Promise<{ path: string; branch: string; size: number }[]> {
   const GH_HEADERS = { 'User-Agent': 'GitSecretScanner/2.0', Accept: 'application/vnd.github.v3+json' }
-  const repoRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers: GH_HEADERS })
+
+  // Fetch repo metadata and two candidate branches IN PARALLEL
+  const [repoRes, mainTree, masterTree] = await Promise.all([
+    fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}`, { headers: GH_HEADERS }, 10000),
+    fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}/git/trees/main?recursive=1`, { headers: GH_HEADERS }, 15000),
+    fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}/git/trees/master?recursive=1`, { headers: GH_HEADERS }, 15000),
+  ])
+
   if (!repoRes.ok) throw new Error(`GitHub API error: ${repoRes.status} ${repoRes.statusText}`)
   const repoData: any = await repoRes.json()
-  const branch = repoData.default_branch ?? 'main'
+  const branch: string = repoData.default_branch ?? 'main'
 
-  const treeRes = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
-    { headers: GH_HEADERS }
-  )
+  // Use whichever branch tree resolved correctly
+  const treeRes = branch === 'master' ? masterTree : (mainTree.ok ? mainTree : masterTree)
   if (!treeRes.ok) throw new Error(`GitHub tree API error: ${treeRes.status}`)
   const treeData: any = await treeRes.json()
 
-  const files: { path: string; url: string; size: number }[] = []
-  const highValue: { path: string; url: string; size: number }[] = []
+  const files: { path: string; size: number }[] = []
+  const highValue: { path: string; size: number }[] = []
 
   for (const item of treeData.tree ?? []) {
     if (item.type !== 'blob') continue
     if (SKIP_DIRS.test(item.path)) continue
     if (item.size > MAX_FILE_SIZE) continue
     if (!SCAN_EXTENSIONS.test(item.path)) continue
-    const entry = { path: item.path, url: item.url, size: item.size ?? 0 }
+    const entry = { path: item.path, size: item.size ?? 0 }
     if (HIGH_VALUE_PATHS.test(item.path)) highValue.push(entry)
     else files.push(entry)
   }
@@ -491,14 +506,28 @@ async function fetchGithubTree(owner: string, repo: string): Promise<{ path: str
   return [...highValue, ...files]
 }
 
-// Fetch raw content directly — MUCH faster than blob API (no base64 encode/decode overhead)
+// Helper: run async tasks in parallel with a concurrency cap
+async function pLimit<T>(tasks: (() => Promise<T>)[], concurrency: number): Promise<T[]> {
+  const results: T[] = new Array(tasks.length)
+  let idx = 0
+  async function worker() {
+    while (idx < tasks.length) {
+      const i = idx++
+      results[i] = await tasks[i]()
+    }
+  }
+  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, worker)
+  await Promise.all(workers)
+  return results
+}
+
+// Fetch raw content directly with timeout — skips binary and oversized files
 async function fetchRawContent(owner: string, repo: string, branch: string, path: string): Promise<string> {
   const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`
   try {
-    const res = await fetch(url, { headers: { 'User-Agent': 'GitSecretScanner/2.0' } })
+    const res = await fetchWithTimeout(url, { headers: { 'User-Agent': 'GitSecretScanner/2.0' } }, 12000)
     if (!res.ok) return ''
     const text = await res.text()
-    // Detect binary content (many null bytes) and skip
     const sample = text.substring(0, 512)
     if ((sample.match(/\x00/g) ?? []).length > 10) return ''
     return text.substring(0, MAX_FILE_SIZE)
@@ -508,13 +537,18 @@ async function fetchRawContent(owner: string, repo: string, branch: string, path
 }
 
 async function fetchCommitMessages(owner: string, repo: string): Promise<{ sha: string; msg: string }[]> {
-  const res = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/commits?per_page=${MAX_COMMITS}`,
-    { headers: { 'User-Agent': 'GitSecretScanner/2.0', Accept: 'application/vnd.github.v3+json' } }
-  )
-  if (!res.ok) return []
-  const data: any = await res.json()
-  return (data as any[]).map((c: any) => ({ sha: c.sha, msg: c.commit?.message ?? '' }))
+  try {
+    const res = await fetchWithTimeout(
+      `https://api.github.com/repos/${owner}/${repo}/commits?per_page=${MAX_COMMITS}`,
+      { headers: { 'User-Agent': 'GitSecretScanner/2.0', Accept: 'application/vnd.github.v3+json' } },
+      10000
+    )
+    if (!res.ok) return []
+    const data: any = await res.json()
+    return (data as any[]).map((c: any) => ({ sha: c.sha, msg: c.commit?.message ?? '' }))
+  } catch {
+    return []   // timeout or network error — commits are optional
+  }
 }
 
 
@@ -533,36 +567,30 @@ app.post('/api/scan/github', async (c) => {
     const { owner, repo } = parsed
     const startTime = Date.now()
 
-    // Fetch repo meta + tree simultaneously
     const GH_HEADERS = { 'User-Agent': 'GitSecretScanner/2.0', Accept: 'application/vnd.github.v3+json' }
-    const repoRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers: GH_HEADERS })
-    if (!repoRes.ok) throw new Error(`GitHub API error: ${repoRes.status} ${repoRes.statusText}`)
-    const repoData: any = await repoRes.json()
-    const branch: string = repoData.default_branch ?? 'main'
 
-    // Tree + commits fetched in parallel
-    const [files, commits] = await Promise.all([
+    // Fetch tree + commits + repo meta ALL in parallel — one round-trip latency instead of three
+    const [files, commits, repoRes] = await Promise.all([
       fetchGithubTree(owner, repo),
       fetchCommitMessages(owner, repo),
+      fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}`, { headers: GH_HEADERS }, 10000),
     ])
+    if (!repoRes.ok) throw new Error(`GitHub API error: ${repoRes.status}`)
+    const repoData: any = await repoRes.json()
+    const branch: string = repoData.default_branch ?? 'main'
 
     const allFindings: Finding[] = []
     const scannedFiles: string[] = []
 
-    // Fetch raw file content in large parallel batches (20 concurrent)
-    const BATCH = 20
-    for (let i = 0; i < files.length; i += BATCH) {
-      const batch = files.slice(i, i + BATCH)
-      const results = await Promise.all(
-        batch.map(async (f) => {
-          const content = await fetchRawContent(owner, repo, branch, f.path)
-          if (!content) return []
-          scannedFiles.push(f.path)
-          return scanText(content, f.path)
-        })
-      )
-      results.forEach((r) => allFindings.push(...r))
-    }
+    // Fetch all files with controlled concurrency (50 parallel) — fast but avoids rate limiting
+    const fileTasks = files.map(f => async () => {
+      const content = await fetchRawContent(owner, repo, branch, f.path)
+      if (!content) return [] as Finding[]
+      scannedFiles.push(f.path)
+      return scanText(content, f.path)
+    })
+    const fileResults = await pLimit(fileTasks, 50)
+    fileResults.forEach(r => allFindings.push(...r))
 
     // Scan commit messages in parallel (no network, pure regex)
     const commitFindings = commits.flatMap(cm =>
@@ -643,23 +671,26 @@ app.post('/api/scan/zip', async (c) => {
     const SCAN_EXT = /\.(env|json|yaml|yml|toml|ini|cfg|conf|config|properties|xml|sh|bash|zsh|py|js|ts|jsx|tsx|rb|go|php|java|cs|cpp|c|h|tf|tfvars|pem|key|crt|cer|p12|pfx|jks|txt|md|gradle|Makefile|Dockerfile|htpasswd|npmrc|netrc|gitcredentials)$/i
     const SKIP_PATH = /^(node_modules|\.git|dist|build|vendor|\.next|__pycache__|\.venv|venv)\//
 
-    let processed = 0
+    // Filter first, then scan in parallel batches
+    const eligible: { name: string; content: string }[] = []
     for (const file of body.files) {
-      // No file count limit
       if (SKIP_PATH.test(file.name)) { skipped.push(file.name); continue }
       if (!SCAN_EXT.test(file.name) && !/\.(env)$/i.test(file.name)) {
-        // also allow files with no extension that look like dotfiles
         if (!file.name.match(/^\.?(env|npmrc|netrc|gitconfig|htpasswd|bashrc|zshrc|profile|credentials|secrets)$/i)) {
           skipped.push(file.name); continue
         }
       }
       if (file.content.length > MAX_BYTES) { skipped.push(file.name + ' (too large)'); continue }
-
-      const findings = scanText(file.content, file.name)
-      allFindings.push(...findings)
-      scannedFiles.push(file.name)
-      processed++
+      eligible.push(file)
     }
+
+    // Scan all eligible files in parallel (CPU-bound in Workers is fine, no network here)
+    const zipTasks = eligible.map(file => () => Promise.resolve(scanText(file.content, file.name)))
+    const zipResults = await pLimit(zipTasks, 100)
+    zipResults.forEach((findings, i) => {
+      allFindings.push(...findings)
+      scannedFiles.push(eligible[i].name)
+    })
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2)
     return c.json({
@@ -1300,6 +1331,7 @@ let currentSeverityFilter = 'all';
 let currentTab = 'github';
 let scannedFilename = 'pasted-content';
 let allPatterns = [];
+let activeScanController = null; // AbortController for active scan — allows cancel
 
 // ─── Telegram Config ──────────────────────────────────────────────────────────
 let tgConfig = { botToken: '', chatId: '', autoNotify: false };
@@ -1812,7 +1844,15 @@ function loadFile(event){
 }
 
 // ─── Progress helpers ─────────────────────────────────────────────────────────
+function cancelScan(){
+  if(activeScanController){ activeScanController.abort(); }
+  hideProgress();
+  showToast('Scan cancelled', 'error');
+}
+
 function showProgress(label){
+  activeScanController = new AbortController();
+  document.getElementById('cancel-scan-btn').classList.remove('hidden');
   document.getElementById('progress-section').classList.remove('hidden');
   document.getElementById('progress-label').textContent = label;
   document.getElementById('progress-fill').style.width = '5%';
@@ -1827,6 +1867,8 @@ function updateProgress(pct, file){
 
 function hideProgress(){
   document.getElementById('progress-section').classList.add('hidden');
+  document.getElementById('cancel-scan-btn').classList.add('hidden');
+  activeScanController = null;
 }
 
 // ─── GitHub Scan ──────────────────────────────────────────────────────────────
@@ -1838,28 +1880,35 @@ async function startGithubScan(){
   showProgress('Connecting to GitHub API...');
   setScanBtnLoading('scan-github-btn', true);
   
-  // Simulate progress updates
+  // Smooth animated progress — creeps continuously so bar never freezes
+  let currentPct = 5;
   const progressSteps = [
-    [15, 'Fetching repository metadata...'],
-    [30, 'Building file tree...'],
-    [50, 'Scanning source files...'],
-    [70, 'Analyzing commit history...'],
-    [85, 'Running pattern detection...'],
-    [95, 'Aggregating results...'],
+    [15, 1200, 'Fetching repository metadata + file tree...'],
+    [35, 1500, 'Building file list + loading commits...'],
+    [55, 2000, 'Scanning source files in parallel...'],
+    [72, 2500, 'Analyzing commit history...'],
+    [85, 2000, 'Running pattern detection...'],
+    [93, 1500, 'Aggregating & deduplicating results...'],
   ];
   let stepIdx = 0;
   const progressInterval = setInterval(() => {
     if(stepIdx < progressSteps.length){
-      const [pct, label] = progressSteps[stepIdx++];
+      const [pct,,label] = progressSteps[stepIdx++];
+      currentPct = pct;
       updateProgress(pct, label);
+    } else {
+      // Creep slowly toward 97% so bar never gets stuck at a fixed value
+      if(currentPct < 97){ currentPct += 0.3; updateProgress(currentPct, null); }
     }
   }, 700);
   
+  const ctrl = activeScanController;
   try {
     const resp = await fetch('/api/scan/github', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ url }),
+      signal: ctrl ? ctrl.signal : undefined,
     });
     clearInterval(progressInterval);
     updateProgress(100, 'Scan complete!');
@@ -1876,7 +1925,8 @@ async function startGithubScan(){
   } catch(e){
     clearInterval(progressInterval);
     hideProgress();
-    showError(e.message);
+    if(e.name === 'AbortError'){ showToast('Scan cancelled', 'error'); return; }
+    showError('Scan failed: ' + (e.message || 'Network error'));
   } finally {
     setScanBtnLoading('scan-github-btn', false);
   }
