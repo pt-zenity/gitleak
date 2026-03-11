@@ -875,12 +875,7 @@ app.get('/', (c) => {
   .tg-toggle.on::after{transform:translateX(20px);}
   @keyframes tg-slide-in{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:translateY(0);}}
   .tg-slide{animation:tg-slide-in 0.2s ease;}
-  /* Folder / Android Scan */
-  .folder-drop{border:2px dashed #30363d;transition:all 0.25s ease;}
-  .folder-drop.drag-over{border-color:#22c55e;background:rgba(34,197,94,0.06);box-shadow:0 0 20px rgba(34,197,94,0.12);}
-  .folder-drop:hover{border-color:#484f58;}
-  .android-profile{border:1px solid #30363d;cursor:pointer;transition:all 0.2s;}
-  .android-profile:hover{border-color:#22c55e;background:rgba(34,197,94,0.06);}
+
   .android-profile.selected{border-color:#22c55e;background:rgba(34,197,94,0.1);box-shadow:0 0 12px rgba(34,197,94,0.15);}
   .folder-file-item{transition:background 0.15s;}
   .folder-file-item:hover{background:rgba(255,255,255,0.03);}
@@ -1045,12 +1040,6 @@ app.get('/', (c) => {
       <button id="tab-zip" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-[#30363d] text-gray-400 hover:text-white transition-all" onclick="switchTab('zip')">
         <i class="fas fa-file-zipper"></i> ZIP Upload
       </button>
-      <button id="tab-folder" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-[#30363d] text-gray-400 hover:text-white transition-all" onclick="switchTab('folder')">
-        <i class="fas fa-folder-open"></i> Folder Scan
-      </button>
-      <button id="tab-android" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-[#30363d] text-gray-400 hover:text-white transition-all" onclick="switchTab('android')">
-        <i class="fab fa-android"></i> Android Scan
-      </button>
       <button id="tab-text" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-[#30363d] text-gray-400 hover:text-white transition-all" onclick="switchTab('text')">
         <i class="fas fa-code"></i> Paste Code
       </button>
@@ -1124,7 +1113,7 @@ app.get('/', (c) => {
           <p class="text-white font-semibold mb-1">Drop ZIP file here or click to browse</p>
           <p class="text-gray-500 text-sm mb-3">Supports .zip, .jar, .war, .ear, .apk, .ipa</p>
           <div class="flex flex-wrap justify-center gap-3 text-xs text-gray-600">
-            <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> Max 200 MB</span>
+            <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> Max 1000 MB</span>
             <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> Up to 300 files scanned</span>
             <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> All secret patterns</span>
             <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> Entire directory tree</span>
@@ -1182,156 +1171,6 @@ app.get('/', (c) => {
 
     <!-- Text/File Tab -->
     <div id="panel-text" class="hidden">
-      <!-- Folder Scan Tab -->
-    <div id="panel-folder" class="hidden">
-      <label class="block text-sm font-medium text-gray-300 mb-3">
-        <i class="fas fa-folder-open mr-2 text-green-400"></i>Folder / Directory Scan
-      </label>
-      <p class="text-xs text-gray-500 mb-4">
-        <i class="fas fa-circle-info mr-1 text-green-400/60"></i>
-        Select any folder from your device — all supported files inside will be read and scanned locally in the browser. Works on desktop and Android file managers that support folder selection.
-      </p>
-
-      <!-- Folder picker area -->
-      <div id="folder-drop-zone"
-        class="folder-drop rounded-2xl px-6 py-10 text-center cursor-pointer relative"
-        onclick="document.getElementById('folder-file-input').click()"
-        ondragover="handleFolderDragOver(event)"
-        ondragleave="handleFolderDragLeave(event)"
-        ondrop="handleFolderDrop(event)">
-        <input id="folder-file-input" type="file" class="hidden" webkitdirectory multiple onchange="handleFolderSelect(event)"/>
-        <div id="folder-idle-state">
-          <div class="w-16 h-16 rounded-2xl bg-green-500/10 border border-green-500/20 flex items-center justify-center mx-auto mb-4">
-            <i class="fas fa-folder-open text-green-400 text-3xl"></i>
-          </div>
-          <p class="text-white font-semibold mb-1">Click to select folder or drag & drop</p>
-          <p class="text-gray-500 text-sm mb-3">Reads all files recursively from the selected folder</p>
-          <div class="flex flex-wrap justify-center gap-4 text-xs text-gray-600">
-            <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> No upload — 100% local</span>
-            <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> Recursive subfolders</span>
-            <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> Up to 500 files</span>
-            <span class="flex items-center gap-1"><i class="fas fa-check text-green-500"></i> All 33 patterns</span>
-          </div>
-        </div>
-        <div id="folder-loaded-state" class="hidden">
-          <div class="w-14 h-14 rounded-xl bg-green-500/10 border border-green-500/20 flex items-center justify-center mx-auto mb-3">
-            <i class="fas fa-circle-check text-green-400 text-2xl"></i>
-          </div>
-          <p class="text-white font-semibold mb-1" id="folder-name-label">folder</p>
-          <p class="text-gray-500 text-sm" id="folder-info-label">0 scannable files</p>
-          <button onclick="resetFolder(event)" class="mt-3 text-xs text-gray-500 hover:text-red-400 transition-colors">
-            <i class="fas fa-xmark mr-1"></i>Change folder
-          </button>
-        </div>
-      </div>
-
-      <!-- Stats row (hidden until loaded) -->
-      <div id="folder-stats-row" class="hidden mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div class="glass rounded-xl p-3 text-center">
-          <div class="text-xl font-black text-white count-up" id="fstat-total">0</div>
-          <div class="text-xs text-gray-500 mt-0.5">Total files</div>
-        </div>
-        <div class="glass rounded-xl p-3 text-center">
-          <div class="text-xl font-black text-green-400 count-up" id="fstat-scannable">0</div>
-          <div class="text-xs text-gray-500 mt-0.5">Scannable</div>
-        </div>
-        <div class="glass rounded-xl p-3 text-center">
-          <div class="text-xl font-black text-yellow-400 count-up" id="fstat-skipped">0</div>
-          <div class="text-xs text-gray-500 mt-0.5">Skipped</div>
-        </div>
-        <div class="glass rounded-xl p-3 text-center">
-          <div class="text-xl font-black text-blue-400 count-up" id="fstat-size">0 KB</div>
-          <div class="text-xs text-gray-500 mt-0.5">Total size</div>
-        </div>
-      </div>
-
-      <!-- File tree + scan button -->
-      <div id="folder-tree-section" class="hidden mt-4">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-xs font-medium text-gray-400 uppercase tracking-wide flex items-center gap-1.5">
-            <i class="fas fa-folder-tree text-green-400"></i>Files to Scan
-          </span>
-          <div class="flex items-center gap-3">
-            <span class="text-xs text-gray-600" id="folder-tree-counts"></span>
-            <button id="scan-folder-btn" onclick="startFolderScan()"
-              class="flex items-center gap-2 px-5 py-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white text-sm font-semibold rounded-xl transition-all shadow-lg hover:shadow-green-500/25">
-              <i class="fas fa-shield-halved"></i> Scan Folder
-            </button>
-          </div>
-        </div>
-        <div id="folder-file-tree" class="terminal-bg rounded-xl p-3 max-h-52 overflow-y-auto text-xs mono space-y-0.5"></div>
-      </div>
-    </div>
-
-    <!-- Android Scan Tab -->
-    <div id="panel-android" class="hidden">
-      <label class="block text-sm font-medium text-gray-300 mb-1">
-        <i class="fab fa-android mr-2 text-green-400"></i>Android Device / Storage Scan
-      </label>
-      <p class="text-xs text-gray-500 mb-4">
-        <i class="fas fa-circle-info mr-1 text-green-400/60"></i>
-        Select your Android device's storage folder from your PC (via USB/MTP), or browse the Android file manager on-device. 
-        Choose a scan profile below or select any folder manually.
-      </p>
-
-      <!-- Scan Profiles -->
-      <div class="mb-5">
-        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3 flex items-center gap-2">
-          <i class="fas fa-sliders text-green-400"></i>Quick Scan Profiles
-        </p>
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3" id="android-profiles-grid">
-          <!-- profiles rendered by JS -->
-        </div>
-      </div>
-
-      <!-- Manual folder picker -->
-      <div class="glass rounded-xl p-4 mb-4">
-        <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3 flex items-center gap-2">
-          <i class="fas fa-folder-plus text-green-400"></i>Or Select Folder Manually
-        </p>
-        <div class="flex items-center gap-3">
-          <div id="android-folder-drop"
-            class="folder-drop flex-1 rounded-xl px-4 py-3 flex items-center gap-3 cursor-pointer"
-            onclick="document.getElementById('android-folder-input').click()">
-            <input id="android-folder-input" type="file" class="hidden" webkitdirectory multiple onchange="handleAndroidFolderSelect(event)"/>
-            <i class="fas fa-folder-open text-green-400 text-lg shrink-0"></i>
-            <div>
-              <p class="text-sm text-white font-medium" id="android-folder-label">Click to select Android folder</p>
-              <p class="text-xs text-gray-500" id="android-folder-sub">Connect phone via USB/MTP or use Android file manager</p>
-            </div>
-          </div>
-          <button id="scan-android-btn" onclick="startAndroidScan()" class="hidden flex items-center gap-2 px-5 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white text-sm font-semibold rounded-xl transition-all shadow-lg hover:shadow-green-500/25">
-            <i class="fas fa-shield-halved"></i> Scan
-          </button>
-        </div>
-      </div>
-
-      <!-- File tree after selection -->
-      <div id="android-tree-section" class="hidden mt-2">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-xs font-medium text-gray-400 uppercase tracking-wide flex items-center gap-1.5">
-            <i class="fab fa-android text-green-400"></i>Detected Files
-            <span class="text-gray-600 font-normal normal-case" id="android-profile-badge"></span>
-          </span>
-          <span class="text-xs text-gray-600" id="android-tree-counts"></span>
-        </div>
-        <div id="android-file-tree" class="terminal-bg rounded-xl p-3 max-h-52 overflow-y-auto text-xs mono space-y-0.5"></div>
-      </div>
-
-      <!-- Android Tips -->
-      <div class="mt-4 glass rounded-xl p-4 border border-green-500/10">
-        <p class="text-xs font-semibold text-gray-400 mb-2 flex items-center gap-2"><i class="fas fa-lightbulb text-yellow-400"></i>Tips for Android Scanning</p>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-gray-500">
-          <div class="flex items-start gap-2"><i class="fas fa-usb text-blue-400 mt-0.5 shrink-0"></i><span><b class="text-gray-400">USB/MTP:</b> Connect phone → enable file transfer → open phone storage in file manager → select folder</span></div>
-          <div class="flex items-start gap-2"><i class="fab fa-android text-green-400 mt-0.5 shrink-0"></i><span><b class="text-gray-400">On-device:</b> Open browser → tap Folder Scan tab → select storage folder from file picker</span></div>
-          <div class="flex items-start gap-2"><i class="fas fa-folder text-yellow-400 mt-0.5 shrink-0"></i><span><b class="text-gray-400">Key paths:</b> <code class="bg-[#21262d] px-1 rounded">/sdcard/</code>, <code class="bg-[#21262d] px-1 rounded">/storage/emulated/0/</code></span></div>
-          <div class="flex items-start gap-2"><i class="fas fa-shield-halved text-red-400 mt-0.5 shrink-0"></i><span><b class="text-gray-400">Scans for:</b> tokens in apps, backup files, config JSONs, .env files, private keys</span></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Text/File Tab original placeholder (kept) -->
-    <div id="panel-text-inner">
       <label class="block text-sm font-medium text-gray-300 mb-2">
         <i class="fas fa-file-code mr-2 text-gray-400"></i>Paste Code or File Content
       </label>
@@ -1640,7 +1479,8 @@ function maybeAutoNotify(){
 function switchTab(tab){
   currentTab = tab;
   ['github','zip','text'].forEach(p => {
-    document.getElementById('panel-'+p).classList.toggle('hidden', tab !== p);
+    const panel = document.getElementById('panel-'+p);
+    if(panel) panel.classList.toggle('hidden', tab !== p);
     const btn = document.getElementById('tab-'+p);
     if(btn){
       btn.classList.toggle('active', tab === p);
@@ -1688,7 +1528,7 @@ function resetZip(e){
 }
 
 async function processZipFile(file){
-  const MAX_MB = 200;
+  const MAX_MB = 1000;
   if(file.size > MAX_MB * 1024 * 1024){
     showToast('File too large. Max ' + MAX_MB + ' MB.', 'error'); return;
   }
