@@ -1278,7 +1278,12 @@ app.get('/', (c) => {
         <div class="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full spinner"></div>
         <span class="text-sm font-medium text-white" id="progress-label">Initializing scan...</span>
       </div>
-      <span class="text-xs text-gray-500" id="progress-pct">0%</span>
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-gray-500" id="progress-pct">0%</span>
+        <button id="cancel-scan-btn" onclick="cancelScan()" class="hidden text-xs px-2 py-1 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 hover:border-red-500/50 text-red-400 rounded-lg transition-all">
+          <i class="fas fa-xmark mr-1"></i>Cancel
+        </button>
+      </div>
     </div>
     <div class="w-full bg-[#21262d] rounded-full h-2">
       <div id="progress-fill" class="progress-bar h-2 bg-gradient-to-r from-red-500 via-orange-500 to-yellow-500 rounded-full" style="width:0%"></div>
@@ -2079,24 +2084,36 @@ function cancelScan(){
 function showProgress(label){
   activeScanController = new AbortController();
   isScanRunning = true;
-  document.getElementById('cancel-scan-btn').classList.remove('hidden');
-  document.getElementById('progress-section').classList.remove('hidden');
-  document.getElementById('progress-label').textContent = label;
-  document.getElementById('progress-fill').style.width = '5%';
-  document.getElementById('progress-pct').textContent = '5%';
+  const cancelBtn = document.getElementById('cancel-scan-btn');
+  if(cancelBtn) cancelBtn.classList.remove('hidden');
+  const progressSection = document.getElementById('progress-section');
+  if(progressSection) progressSection.classList.remove('hidden');
+  const progressLabel = document.getElementById('progress-label');
+  if(progressLabel) progressLabel.textContent = label;
+  const progressFill = document.getElementById('progress-fill');
+  if(progressFill) progressFill.style.width = '5%';
+  const progressPct = document.getElementById('progress-pct');
+  if(progressPct) progressPct.textContent = '5%';
   showBgToast(label);
 }
 
 function updateProgress(pct, file){
-  document.getElementById('progress-fill').style.width = pct + '%';
-  document.getElementById('progress-pct').textContent = Math.round(pct) + '%';
-  if(file) document.getElementById('progress-file').textContent = file;
+  const fill = document.getElementById('progress-fill');
+  if(fill) fill.style.width = pct + '%';
+  const pctEl = document.getElementById('progress-pct');
+  if(pctEl) pctEl.textContent = Math.round(pct) + '%';
+  if(file){
+    const fileEl = document.getElementById('progress-file');
+    if(fileEl) fileEl.textContent = file;
+  }
   updateBgToast(pct, file);
 }
 
 function hideProgress(){
-  document.getElementById('progress-section').classList.add('hidden');
-  document.getElementById('cancel-scan-btn').classList.add('hidden');
+  const progressSection = document.getElementById('progress-section');
+  if(progressSection) progressSection.classList.add('hidden');
+  const cancelBtn = document.getElementById('cancel-scan-btn');
+  if(cancelBtn) cancelBtn.classList.add('hidden');
   activeScanController = null;
   isScanRunning = false;
   hideBgToast();

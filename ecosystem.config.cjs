@@ -7,8 +7,8 @@ module.exports = {
       cwd: '/home/user/webapp',
       env: {
         NODE_ENV: 'production',
-        HTTP_PORT: 80,
-        HTTPS_PORT: 443,
+        HTTP_PORT: 3000,
+        HTTPS_PORT: 3443,
         HOST: '0.0.0.0',
         // SSL_MODE options:
         //   'auto'        → auto-detect: Cloudflare Origin Cert → custom → Let's Encrypt → HTTP only
