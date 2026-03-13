@@ -1233,28 +1233,29 @@ app.get('/', (c) => {
         </button>
       </div>
     </div>
-  </div>
 
-  <!-- History Panel -->
-  <div id="panel-history" class="hidden">
-    <div class="flex items-center justify-between mb-4">
-      <div>
-        <h3 class="text-base font-semibold text-white flex items-center gap-2">
-          <i class="fas fa-clock-rotate-left text-blue-400"></i> Scan History
-        </h3>
-        <p class="text-xs text-gray-500 mt-0.5">Hasil scan tersimpan secara lokal di browser</p>
+    <!-- History Panel -->
+    <div id="panel-history" class="hidden">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="text-base font-semibold text-white flex items-center gap-2">
+            <i class="fas fa-clock-rotate-left text-blue-400"></i> Scan History
+          </h3>
+          <p class="text-xs text-gray-500 mt-0.5">Hasil scan tersimpan secara lokal di browser</p>
+        </div>
+        <button onclick="clearHistory()" class="flex items-center gap-1.5 px-3 py-1.5 bg-[#21262d] hover:bg-red-500/10 border border-[#30363d] hover:border-red-500/40 text-gray-400 hover:text-red-400 text-xs rounded-lg transition-all">
+          <i class="fas fa-trash"></i> Hapus Semua
+        </button>
       </div>
-      <button onclick="clearHistory()" class="flex items-center gap-1.5 px-3 py-1.5 bg-[#21262d] hover:bg-red-500/10 border border-[#30363d] hover:border-red-500/40 text-gray-400 hover:text-red-400 text-xs rounded-lg transition-all">
-        <i class="fas fa-trash"></i> Hapus Semua
-      </button>
-    </div>
-    <div id="history-list" class="space-y-3">
-      <div class="text-center text-gray-600 py-12">
-        <i class="fas fa-clock-rotate-left text-4xl mb-3 opacity-20"></i>
-        <p class="text-sm">Belum ada riwayat scan</p>
+      <div id="history-list" class="space-y-3">
+        <div class="text-center text-gray-600 py-12">
+          <i class="fas fa-clock-rotate-left text-4xl mb-3 opacity-20"></i>
+          <p class="text-sm">Belum ada riwayat scan</p>
+        </div>
       </div>
     </div>
-  </div>
+
+  </div><!-- /scan input card -->
 
   <!-- Background Scan Toast (shown when scan running in background) -->
   <div id="bg-scan-toast" class="hidden fixed bottom-6 right-6 z-50 glass rounded-2xl p-4 shadow-2xl border border-orange-500/30 max-w-sm w-full">
@@ -1271,7 +1272,6 @@ app.get('/', (c) => {
     <div class="text-xs text-gray-500 mt-1" id="bg-scan-file"></div>
   </div>
 
-</div><!-- /scan input card -->
   <div id="progress-section" class="hidden mb-6 glass rounded-2xl p-5">
     <div class="flex items-center justify-between mb-3">
       <div class="flex items-center gap-3">
