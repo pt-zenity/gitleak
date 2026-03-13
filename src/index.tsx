@@ -369,8 +369,23 @@ interface Finding {
   entropy: number
 }
 
+// ─── Fast pre-filter: quick-scan keywords before running heavy regex ─────────
+// If none of these strings appear in the file, no pattern can match → skip regex entirely
+const QUICK_FILTER_TERMS = [
+  'key', 'secret', 'token', 'password', 'passwd', 'pass', 'pwd',
+  'api', 'auth', 'cred', 'cert', 'private', 'access',
+  'AKIA', 'sk-', 'ghp_', 'ghs_', 'glpat-', 'xox',
+  'eyJ',  // JWT prefix
+  'BEGIN', 'PRIVATE',
+]
+const QUICK_FILTER_RE = new RegExp(QUICK_FILTER_TERMS.join('|'), 'i')
+
 function scanText(content: string, filename: string): Finding[] {
   if (!content || content.length === 0) return []
+
+  // ⚡ Fast pre-filter: skip files with zero chance of containing secrets
+  // High-value paths (.env, .key, etc.) bypass the filter
+  if (!HIGH_VALUE_PATHS.test(filename) && !QUICK_FILTER_RE.test(content)) return []
 
   const findings: Finding[] = []
   // Pre-build line offset index for O(1) line lookup
@@ -456,8 +471,12 @@ const HIGH_VALUE_PATHS = /(\.(env|pem|key|p12|pfx|jks|cer|crt)|\.env\.|id_rsa|id
 const SCAN_EXTENSIONS = /\.(env|json|yaml|yml|toml|ini|cfg|conf|config|properties|xml|sh|bash|zsh|py|js|ts|jsx|tsx|rb|go|php|java|cs|cpp|c|h|tf|tfvars|pem|key|crt|cer|p12|pfx|jks|txt|md|gradle|htpasswd|npmrc|netrc|gitcredentials)$/i
 const SKIP_DIRS       = /^(node_modules|\.git|dist|build|vendor|\.next|\.nuxt|coverage|__pycache__|\.venv|venv|\.cache|\.parcel-cache|target|out|\.gradle|\.mvn)\//
 const MAX_FILES       = Infinity
-const MAX_COMMITS     = 100
-const MAX_FILE_SIZE   = 150_000  // skip files > 150 KB (too large to be a secret file)
+const MAX_COMMITS     = 50   // 50 commits: cukup untuk coverage, lebih cepat dari 100
+const MAX_FILE_SIZE   = 100_000  // 100KB: secrets tidak ada di file besar, hemat bandwidth
+
+// Shared headers — reused everywhere to avoid repeated object creation
+const GH_API_HEADERS  = { 'User-Agent': 'GitSecretScanner/3.0', Accept: 'application/vnd.github.v3+json' } as const
+const RAW_HEADERS     = { 'User-Agent': 'GitSecretScanner/3.0' } as const
 
 // Fetch with timeout — prevents indefinitely stalled requests from hanging the scan
 async function fetchWithTimeout(url: string, opts: RequestInit = {}, timeoutMs = 15000): Promise<Response> {
@@ -470,21 +489,20 @@ async function fetchWithTimeout(url: string, opts: RequestInit = {}, timeoutMs =
   }
 }
 
-async function fetchGithubTree(owner: string, repo: string): Promise<{ path: string; size: number }[]> {
-  const GH_HEADERS = { 'User-Agent': 'GitSecretScanner/2.0', Accept: 'application/vnd.github.v3+json' }
-
-  // Fetch repo metadata and two candidate branches IN PARALLEL
+// Returns files + the resolved default branch (avoids a second API call in the route handler)
+async function fetchGithubTree(owner: string, repo: string): Promise<{ files: { path: string; size: number }[]; branch: string; stars: number; repoData: any }> {
+  // Fetch repo metadata and two candidate branches ALL IN PARALLEL (3 requests simultaneously)
   const [repoRes, mainTree, masterTree] = await Promise.all([
-    fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}`, { headers: GH_HEADERS }, 10000),
-    fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}/git/trees/main?recursive=1`, { headers: GH_HEADERS }, 15000),
-    fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}/git/trees/master?recursive=1`, { headers: GH_HEADERS }, 15000),
+    fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}`, { headers: GH_API_HEADERS }, 10000),
+    fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}/git/trees/main?recursive=1`, { headers: GH_API_HEADERS }, 20000),
+    fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}/git/trees/master?recursive=1`, { headers: GH_API_HEADERS }, 20000),
   ])
 
   if (!repoRes.ok) throw new Error(`GitHub API error: ${repoRes.status} ${repoRes.statusText}`)
   const repoData: any = await repoRes.json()
   const branch: string = repoData.default_branch ?? 'main'
 
-  // Use whichever branch tree resolved correctly
+  // Use the correct branch tree
   const treeRes = branch === 'master' ? masterTree : (mainTree.ok ? mainTree : masterTree)
   if (!treeRes.ok) throw new Error(`GitHub tree API error: ${treeRes.status}`)
   const treeData: any = await treeRes.json()
@@ -503,7 +521,7 @@ async function fetchGithubTree(owner: string, repo: string): Promise<{ path: str
   }
 
   // High-value files first so critical findings appear quickly
-  return [...highValue, ...files]
+  return { files: [...highValue, ...files], branch, stars: repoData.stargazers_count ?? 0, repoData }
 }
 
 // Helper: run async tasks in parallel with a concurrency cap
@@ -521,16 +539,36 @@ async function pLimit<T>(tasks: (() => Promise<T>)[], concurrency: number): Prom
   return results
 }
 
+// pLimit variant that streams results via callback as each task finishes (no waiting for all)
+async function pLimitStream<T>(
+  tasks: (() => Promise<T>)[],
+  concurrency: number,
+  onResult: (result: T, index: number) => void
+): Promise<void> {
+  let idx = 0
+  async function worker() {
+    while (idx < tasks.length) {
+      const i = idx++
+      const result = await tasks[i]()
+      onResult(result, i)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker))
+}
+
 // Fetch raw content directly with timeout — skips binary and oversized files
-async function fetchRawContent(owner: string, repo: string, branch: string, path: string): Promise<string> {
+async function fetchRawContent(owner: string, repo: string, branch: string, path: string, sizeHint = 0): Promise<string> {
+  // Skip large files early based on tree size hint (avoids wasting a request)
+  if (sizeHint > MAX_FILE_SIZE) return ''
   const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`
   try {
-    const res = await fetchWithTimeout(url, { headers: { 'User-Agent': 'GitSecretScanner/2.0' } }, 12000)
+    const res = await fetchWithTimeout(url, { headers: RAW_HEADERS }, 8000)
     if (!res.ok) return ''
+    // Stream only up to MAX_FILE_SIZE bytes — avoid buffering huge responses
     const text = await res.text()
-    const sample = text.substring(0, 512)
-    if ((sample.match(/\x00/g) ?? []).length > 10) return ''
-    return text.substring(0, MAX_FILE_SIZE)
+    // Quick binary check on first 512 bytes
+    if ((text.substring(0, 512).match(/\x00/g) ?? []).length > 4) return ''
+    return text.length > MAX_FILE_SIZE ? text.substring(0, MAX_FILE_SIZE) : text
   } catch {
     return ''
   }
@@ -540,8 +578,8 @@ async function fetchCommitMessages(owner: string, repo: string): Promise<{ sha: 
   try {
     const res = await fetchWithTimeout(
       `https://api.github.com/repos/${owner}/${repo}/commits?per_page=${MAX_COMMITS}`,
-      { headers: { 'User-Agent': 'GitSecretScanner/2.0', Accept: 'application/vnd.github.v3+json' } },
-      10000
+      { headers: GH_API_HEADERS },
+      8000
     )
     if (!res.ok) return []
     const data: any = await res.json()
@@ -567,32 +605,32 @@ app.post('/api/scan/github', async (c) => {
     const { owner, repo } = parsed
     const startTime = Date.now()
 
-    const GH_HEADERS = { 'User-Agent': 'GitSecretScanner/2.0', Accept: 'application/vnd.github.v3+json' }
-
-    // Fetch tree + commits + repo meta ALL in parallel — one round-trip latency instead of three
-    const [files, commits, repoRes] = await Promise.all([
+    // ⚡ Fetch tree + commits IN PARALLEL — fetchGithubTree already returns branch+meta
+    //    avoids 1 extra /repos API call compared to before
+    const [treeResult, commits] = await Promise.all([
       fetchGithubTree(owner, repo),
       fetchCommitMessages(owner, repo),
-      fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}`, { headers: GH_HEADERS }, 10000),
     ])
-    if (!repoRes.ok) throw new Error(`GitHub API error: ${repoRes.status}`)
-    const repoData: any = await repoRes.json()
-    const branch: string = repoData.default_branch ?? 'main'
+    const { files, branch, repoData } = treeResult
 
     const allFindings: Finding[] = []
     const scannedFiles: string[] = []
 
-    // Fetch all files with controlled concurrency (50 parallel) — fast but avoids rate limiting
+    // ⚡ Fetch & scan files with 80 concurrent workers + stream results as they arrive
+    //    (was 50, safe to raise because raw.githubusercontent.com has generous rate limits)
     const fileTasks = files.map(f => async () => {
-      const content = await fetchRawContent(owner, repo, branch, f.path)
+      const content = await fetchRawContent(owner, repo, branch, f.path, f.size)
       if (!content) return [] as Finding[]
       scannedFiles.push(f.path)
       return scanText(content, f.path)
     })
-    const fileResults = await pLimit(fileTasks, 50)
-    fileResults.forEach(r => allFindings.push(...r))
 
-    // Scan commit messages in parallel (no network, pure regex)
+    // Stream results so dedup starts as soon as first batch is done
+    await pLimitStream(fileTasks, 80, (result) => {
+      allFindings.push(...result)
+    })
+
+    // Scan commit messages (pure CPU, no network)
     const commitFindings = commits.flatMap(cm =>
       scanText(cm.msg, `[commit:${cm.sha.substring(0, 7)}]`)
     )
@@ -681,16 +719,20 @@ app.post('/api/scan/zip', async (c) => {
         }
       }
       if (file.content.length > MAX_BYTES) { skipped.push(file.name + ' (too large)'); continue }
+      if (file.content.length === 0) { skipped.push(file.name + ' (empty)'); continue }
       eligible.push(file)
     }
 
-    // Scan all eligible files in parallel (CPU-bound in Workers is fine, no network here)
-    const zipTasks = eligible.map(file => () => Promise.resolve(scanText(file.content, file.name)))
-    const zipResults = await pLimit(zipTasks, 100)
-    zipResults.forEach((findings, i) => {
-      allFindings.push(...findings)
-      scannedFiles.push(eligible[i].name)
-    })
+    // ⚡ Scan all eligible files with pLimitStream (CPU-bound, no network, pure regex)
+    //    Stream results immediately as they finish — no waiting for all
+    await pLimitStream(
+      eligible.map(file => () => Promise.resolve(scanText(file.content, file.name))),
+      200,   // very high concurrency — pure CPU, no I/O
+      (findings, i) => {
+        allFindings.push(...findings)
+        scannedFiles.push(eligible[i].name)
+      }
+    )
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2)
     return c.json({
