@@ -28,7 +28,7 @@ cat << 'BANNER'
   ╚═════╝ ╚═╝   ╚═╝   ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝
      H U N T E R  —  G i t  S e c r e t  S c a n n e r
 BANNER
-echo -e "${NC}${BOLD}         Local Install (Node.js + PM2) — v2.0${NC}"
+echo -e "${NC}${BOLD}         Local Install (Node.js + PM2) — v3.0${NC}"
 echo -e "${CYAN}   https://github.com/pt-zenity/gitleak${NC}\n"
 
 # ─── Konfigurasi default (bisa di-override lewat env / argumen) ──────────────
@@ -264,12 +264,13 @@ module.exports = {
   apps: [
     {
       name: '${APP_NAME}',
-      script: 'npx',
-      args: 'wrangler pages dev dist --ip 0.0.0.0 --port ${APP_PORT}',
+      script: 'node',
+      args: 'dist/server.js',
       cwd: '${APP_DIR}',
       env: {
         NODE_ENV: 'production',
         PORT: ${APP_PORT},
+        HOST: '0.0.0.0',
       },
       watch: false,
       instances: 1,
@@ -575,7 +576,7 @@ fi
 echo -e "  ${BOLD}${YELLOW}── Update ke versi terbaru ────────────────────────────${NC}"
 echo -e "  ${CYAN}bash ${APP_DIR}/install-local.sh --update${NC}"
 echo -e "  ${YELLOW}atau secara manual:${NC}"
-echo -e "  ${CYAN}cd ${APP_DIR} && git pull && npm install && npm run build && pm2 restart ${APP_NAME}${NC}"
+echo -e "  ${CYAN}cd ${APP_DIR} && git pull && npm install && npm run build && pm2 restart ${APP_NAME} --update-env${NC}"
 echo ""
 echo -e "  ${BOLD}${YELLOW}── Uninstall ──────────────────────────────────────────${NC}"
 echo -e "  ${CYAN}bash ${APP_DIR}/install-local.sh --uninstall${NC}"

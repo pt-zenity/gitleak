@@ -2,16 +2,21 @@ module.exports = {
   apps: [
     {
       name: 'gitleakhunter',
-      script: 'npx',
-      args: 'wrangler pages dev dist --ip 0.0.0.0 --port 3000',
+      script: 'node',
+      args: 'dist/server.js',
       cwd: '/home/user/webapp',
       env: {
-        NODE_ENV: 'development',
-        PORT: 3000
+        NODE_ENV: 'production',
+        PORT: 3000,
+        HOST: '0.0.0.0',
       },
       watch: false,
       instances: 1,
-      exec_mode: 'fork'
+      exec_mode: 'fork',
+      autorestart: true,
+      max_restarts: 15,
+      restart_delay: 3000,
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
     }
   ]
 }

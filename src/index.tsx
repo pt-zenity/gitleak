@@ -470,7 +470,7 @@ async function fetchWithTimeout(url: string, opts: RequestInit = {}, timeoutMs =
   }
 }
 
-async function fetchGithubTree(owner: string, repo: string): Promise<{ path: string; branch: string; size: number }[]> {
+async function fetchGithubTree(owner: string, repo: string): Promise<{ path: string; size: number }[]> {
   const GH_HEADERS = { 'User-Agent': 'GitSecretScanner/2.0', Accept: 'application/vnd.github.v3+json' }
 
   // Fetch repo metadata and two candidate branches IN PARALLEL
