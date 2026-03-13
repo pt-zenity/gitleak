@@ -904,6 +904,11 @@ app.get('/', (c) => {
   .tg-toggle.on{background:#29b6f6;}
   .tg-toggle::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform 0.2s;}
   .tg-toggle.on::after{transform:translateX(20px);}
+  .history-item{transition:all 0.2s;}
+  .history-item:hover{border-color:rgba(88,166,255,0.3)!important;}
+  .history-item.scanning{border-color:rgba(249,115,22,0.4)!important;background:rgba(249,115,22,0.03);}
+  @keyframes pulse-border{0%,100%{border-color:rgba(249,115,22,0.4);}50%{border-color:rgba(249,115,22,0.8);}}
+  .history-item.scanning{animation:pulse-border 2s infinite;}
   @keyframes tg-slide-in{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:translateY(0);}}
   .tg-slide{animation:tg-slide-in 0.2s ease;}
 
@@ -1074,6 +1079,10 @@ app.get('/', (c) => {
       <button id="tab-text" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-[#30363d] text-gray-400 hover:text-white transition-all" onclick="switchTab('text')">
         <i class="fas fa-code"></i> Paste Code
       </button>
+      <button id="tab-history" class="tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-[#30363d] text-gray-400 hover:text-white transition-all" onclick="switchTab('history')">
+        <i class="fas fa-clock-rotate-left"></i> History
+        <span id="history-badge" class="hidden ml-1 px-1.5 py-0.5 bg-blue-500/20 border border-blue-500/40 text-blue-400 text-xs rounded-full font-bold"></span>
+      </button>
     </div>
 
     <!-- GitHub Tab -->
@@ -1226,7 +1235,43 @@ app.get('/', (c) => {
     </div>
   </div>
 
-  <!-- Progress Bar (hidden initially) -->
+  <!-- History Panel -->
+  <div id="panel-history" class="hidden">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h3 class="text-base font-semibold text-white flex items-center gap-2">
+          <i class="fas fa-clock-rotate-left text-blue-400"></i> Scan History
+        </h3>
+        <p class="text-xs text-gray-500 mt-0.5">Hasil scan tersimpan secara lokal di browser</p>
+      </div>
+      <button onclick="clearHistory()" class="flex items-center gap-1.5 px-3 py-1.5 bg-[#21262d] hover:bg-red-500/10 border border-[#30363d] hover:border-red-500/40 text-gray-400 hover:text-red-400 text-xs rounded-lg transition-all">
+        <i class="fas fa-trash"></i> Hapus Semua
+      </button>
+    </div>
+    <div id="history-list" class="space-y-3">
+      <div class="text-center text-gray-600 py-12">
+        <i class="fas fa-clock-rotate-left text-4xl mb-3 opacity-20"></i>
+        <p class="text-sm">Belum ada riwayat scan</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Background Scan Toast (shown when scan running in background) -->
+  <div id="bg-scan-toast" class="hidden fixed bottom-6 right-6 z-50 glass rounded-2xl p-4 shadow-2xl border border-orange-500/30 max-w-sm w-full">
+    <div class="flex items-center gap-3 mb-2">
+      <div class="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full spinner flex-shrink-0"></div>
+      <span class="text-sm font-medium text-white flex-1" id="bg-scan-label">Scan berjalan di background...</span>
+      <button onclick="cancelScan()" class="text-gray-500 hover:text-red-400 transition-colors text-xs px-2 py-0.5 border border-[#30363d] rounded hover:border-red-500/40">
+        <i class="fas fa-xmark"></i>
+      </button>
+    </div>
+    <div class="w-full bg-[#21262d] rounded-full h-1.5">
+      <div id="bg-scan-fill" class="h-1.5 rounded-full bg-gradient-to-r from-orange-500 to-yellow-400 transition-all duration-500" style="width:5%"></div>
+    </div>
+    <div class="text-xs text-gray-500 mt-1" id="bg-scan-file"></div>
+  </div>
+
+</div><!-- /scan input card -->
   <div id="progress-section" class="hidden mb-6 glass rounded-2xl p-5">
     <div class="flex items-center justify-between mb-3">
       <div class="flex items-center gap-3">
@@ -1332,6 +1377,183 @@ let currentTab = 'github';
 let scannedFilename = 'pasted-content';
 let allPatterns = [];
 let activeScanController = null; // AbortController for active scan — allows cancel
+let isScanRunning = false;       // true saat scan berlangsung (bisa di background)
+
+// ─── Scan History ─────────────────────────────────────────────────────────────
+const HISTORY_KEY = 'gitleakhunter_history';
+const HISTORY_MAX = 20;
+
+function getHistory(){
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch { return []; }
+}
+
+function saveToHistory(data, label){
+  const history = getHistory();
+  const entry = {
+    id: Date.now(),
+    label: label || data.meta?.repo || 'Scan',
+    timestamp: new Date().toISOString(),
+    meta: data.meta,
+    findings: data.findings,
+    totalFindings: data.findings?.length || 0,
+    critical: data.findings?.filter(f => f.severity === 'critical').length || 0,
+    high: data.findings?.filter(f => f.severity === 'high').length || 0,
+  };
+  history.unshift(entry);
+  if(history.length > HISTORY_MAX) history.splice(HISTORY_MAX);
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  updateHistoryBadge();
+  if(currentTab === 'history') renderHistory();
+}
+
+function updateHistoryBadge(){
+  const history = getHistory();
+  const badge = document.getElementById('history-badge');
+  if(!badge) return;
+  if(history.length > 0){
+    badge.textContent = history.length;
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+
+function renderHistory(){
+  const history = getHistory();
+  const container = document.getElementById('history-list');
+  if(!container) return;
+  if(history.length === 0){
+    container.innerHTML = \`
+      <div class="text-center text-gray-600 py-12">
+        <i class="fas fa-clock-rotate-left text-4xl mb-3 opacity-20"></i>
+        <p class="text-sm">Belum ada riwayat scan</p>
+        <p class="text-xs mt-1 text-gray-700">Hasil scan akan tersimpan otomatis di sini</p>
+      </div>\`;
+    return;
+  }
+
+  container.innerHTML = history.map(entry => {
+    const dt = new Date(entry.timestamp);
+    const timeStr = dt.toLocaleDateString('id-ID', { day:'2-digit', month:'short', year:'numeric' })
+      + ' ' + dt.toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' });
+    const platform = entry.meta?.platform || 'unknown';
+    const pIcons = { github:'fab fa-github', gitlab:'fab fa-gitlab text-orange-400', zip:'fas fa-file-zipper text-violet-400', text:'fas fa-code text-green-400' };
+    const pIcon = pIcons[platform] || 'fas fa-globe text-gray-400';
+    const elapsed = entry.meta?.elapsed ? \`\${entry.meta.elapsed}s\` : '';
+    const scanned = entry.meta?.scannedFiles ? \`\${entry.meta.scannedFiles} files\` : '';
+    const sevDots = [
+      entry.critical > 0 ? \`<span class="px-2 py-0.5 rounded-full text-xs bg-red-500/15 text-red-400 border border-red-500/20">\${entry.critical} critical</span>\` : '',
+      entry.high > 0 ? \`<span class="px-2 py-0.5 rounded-full text-xs bg-orange-500/15 text-orange-400 border border-orange-500/20">\${entry.high} high</span>\` : '',
+    ].filter(Boolean).join('');
+
+    return \`
+    <div class="history-item glass rounded-xl p-4 border border-[#30363d] cursor-pointer group" onclick="loadHistoryEntry(\${entry.id})">
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 mb-1">
+            <i class="\${pIcon} text-sm"></i>
+            <span class="text-sm font-medium text-white truncate">\${entry.label}</span>
+            \${entry.totalFindings > 0
+              ? \`<span class="ml-auto flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-bold bg-red-500/15 text-red-400 border border-red-500/20">\${entry.totalFindings} findings</span>\`
+              : \`<span class="ml-auto flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-bold bg-green-500/15 text-green-400 border border-green-500/20">Clean</span>\`
+            }
+          </div>
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+            <span><i class="fas fa-calendar mr-1"></i>\${timeStr}</span>
+            \${elapsed ? \`<span><i class="fas fa-clock mr-1"></i>\${elapsed}</span>\` : ''}
+            \${scanned ? \`<span><i class="fas fa-file-code mr-1"></i>\${scanned}</span>\` : ''}
+          </div>
+          \${sevDots ? \`<div class="flex flex-wrap gap-1.5 mt-2">\${sevDots}</div>\` : ''}
+        </div>
+        <div class="flex items-center gap-1 flex-shrink-0">
+          <button onclick="event.stopPropagation();deleteHistoryEntry(\${entry.id})" class="opacity-0 group-hover:opacity-100 p-1.5 hover:bg-red-500/10 hover:text-red-400 text-gray-600 rounded-lg transition-all" title="Hapus">
+            <i class="fas fa-trash text-xs"></i>
+          </button>
+          <span class="text-gray-600 group-hover:text-blue-400 transition-colors"><i class="fas fa-chevron-right text-xs"></i></span>
+        </div>
+      </div>
+    </div>\`;
+  }).join('');
+}
+
+function loadHistoryEntry(id){
+  const history = getHistory();
+  const entry = history.find(e => e.id === id);
+  if(!entry) return;
+  scanResults = { findings: entry.findings, meta: entry.meta };
+  switchTab('github'); // kembali ke tab scan untuk tampilkan hasil
+  renderResults(scanResults);
+  showToast(\`Memuat hasil: \${entry.label}\`, 'success');
+}
+
+function deleteHistoryEntry(id){
+  let history = getHistory();
+  history = history.filter(e => e.id !== id);
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  updateHistoryBadge();
+  renderHistory();
+}
+
+function clearHistory(){
+  if(!confirm('Hapus semua riwayat scan?')) return;
+  localStorage.removeItem(HISTORY_KEY);
+  updateHistoryBadge();
+  renderHistory();
+  showToast('Riwayat scan dihapus', 'success');
+}
+
+// ─── Background Scan UI ───────────────────────────────────────────────────────
+function showBgToast(label){
+  const toast = document.getElementById('bg-scan-toast');
+  if(toast){
+    toast.classList.remove('hidden');
+    document.getElementById('bg-scan-label').textContent = label || 'Scan berjalan di background...';
+    document.getElementById('bg-scan-fill').style.width = '5%';
+    document.getElementById('bg-scan-file').textContent = '';
+  }
+}
+
+function updateBgToast(pct, file){
+  const fill = document.getElementById('bg-scan-fill');
+  const fileEl = document.getElementById('bg-scan-file');
+  if(fill) fill.style.width = pct + '%';
+  if(file && fileEl) fileEl.textContent = file;
+  // Sync label di bg toast dengan progress label utama
+  const lbl = document.getElementById('progress-label');
+  const bgLbl = document.getElementById('bg-scan-label');
+  if(lbl && bgLbl) bgLbl.textContent = lbl.textContent;
+}
+
+function hideBgToast(){
+  const toast = document.getElementById('bg-scan-toast');
+  if(toast) toast.classList.add('hidden');
+}
+
+// Browser notification saat scan selesai di background
+function notifyScanDone(label, totalFindings){
+  if(document.visibilityState === 'visible') return; // tidak perlu notif jika tab aktif
+  if(!('Notification' in window)) return;
+  const send = () => {
+    const msg = totalFindings > 0
+      ? \`\${totalFindings} findings ditemukan!\`
+      : 'Tidak ada rahasia terdeteksi.';
+    new Notification(\`✅ Scan selesai — \${label}\`, {
+      body: msg,
+      icon: '/favicon.ico',
+    });
+  };
+  if(Notification.permission === 'granted'){ send(); }
+  else if(Notification.permission !== 'denied'){
+    Notification.requestPermission().then(p => { if(p === 'granted') send(); });
+  }
+}
+
+// Request notification permission awal
+function requestNotifPermission(){
+  if('Notification' in window && Notification.permission === 'default'){
+    Notification.requestPermission();
+  }
+}
 
 // ─── Telegram Config ──────────────────────────────────────────────────────────
 let tgConfig = { botToken: '', chatId: '', autoNotify: false };
@@ -1510,7 +1732,7 @@ function maybeAutoNotify(){
 // ─── Tab switching ────────────────────────────────────────────────────────────
 function switchTab(tab){
   currentTab = tab;
-  ['github','zip','text'].forEach(p => {
+  ['github','zip','text','history'].forEach(p => {
     const panel = document.getElementById('panel-'+p);
     if(panel) panel.classList.toggle('hidden', tab !== p);
     const btn = document.getElementById('tab-'+p);
@@ -1519,6 +1741,7 @@ function switchTab(tab){
       btn.classList.toggle('text-gray-400', tab !== p);
     }
   });
+  if(tab === 'history') renderHistory();
 }
 
 function setExample(url){
@@ -1746,6 +1969,9 @@ async function startZipScan(){
     data.meta = data.meta || {};
     data.meta.zipName = zipRawFile ? zipRawFile.name : 'archive.zip';
     scanResults = data;
+    const zipLabel = data.meta.zipName || 'ZIP Scan';
+    saveToHistory(data, zipLabel);
+    notifyScanDone(zipLabel, data.findings?.length || 0);
     renderZipResults(data);
     showSendNowBtn();
     maybeAutoNotify();
@@ -1852,23 +2078,28 @@ function cancelScan(){
 
 function showProgress(label){
   activeScanController = new AbortController();
+  isScanRunning = true;
   document.getElementById('cancel-scan-btn').classList.remove('hidden');
   document.getElementById('progress-section').classList.remove('hidden');
   document.getElementById('progress-label').textContent = label;
   document.getElementById('progress-fill').style.width = '5%';
   document.getElementById('progress-pct').textContent = '5%';
+  showBgToast(label);
 }
 
 function updateProgress(pct, file){
   document.getElementById('progress-fill').style.width = pct + '%';
   document.getElementById('progress-pct').textContent = Math.round(pct) + '%';
   if(file) document.getElementById('progress-file').textContent = file;
+  updateBgToast(pct, file);
 }
 
 function hideProgress(){
   document.getElementById('progress-section').classList.add('hidden');
   document.getElementById('cancel-scan-btn').classList.add('hidden');
   activeScanController = null;
+  isScanRunning = false;
+  hideBgToast();
 }
 
 // ─── GitHub Scan ──────────────────────────────────────────────────────────────
@@ -1919,6 +2150,9 @@ async function startGithubScan(){
     if(!resp.ok || data.error){ showError(data.error || 'Unknown error'); return; }
     
     scanResults = data;
+    const ghLabel = data.meta?.repo || url;
+    saveToHistory(data, ghLabel);
+    notifyScanDone(ghLabel, data.findings?.length || 0);
     renderResults(data);
     showSendNowBtn();
     maybeAutoNotify();
@@ -1956,6 +2190,9 @@ async function startTextScan(){
     if(!resp.ok || data.error){ showError(data.error || 'Unknown error'); return; }
     
     scanResults = data;
+    const txtLabel = scannedFilename || 'Text Scan';
+    saveToHistory(data, txtLabel);
+    notifyScanDone(txtLabel, data.findings?.length || 0);
     renderResults(data);
     showSendNowBtn();
     maybeAutoNotify();
@@ -2286,6 +2523,8 @@ document.getElementById('github-url').addEventListener('keydown', e => { if(e.ke
 // Init
 loadPatterns();
 loadTgConfig();
+updateHistoryBadge();
+requestNotifPermission();
 </script>
 </body>
 </html>`)
