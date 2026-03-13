@@ -911,6 +911,7 @@ app.get('/', (c) => {
   .tab-btn.active{background:rgba(88,166,255,0.15);border-color:#58a6ff;color:#58a6ff;}
   .copy-btn:active{transform:scale(0.95);}
   .copy-btn.copied{color:#4ade80 !important;border-color:rgba(74,222,128,0.4) !important;}
+  .copy-btn i, .copy-btn span{pointer-events:none;}
   .copy-group{display:flex;align-items:center;gap:0.375rem;flex-wrap:wrap;}
   .progress-bar{transition:width 0.3s ease;}
   .hero-gradient{background:linear-gradient(135deg,rgba(13,17,23,1) 0%,rgba(22,27,34,1) 50%,rgba(13,17,23,1) 100%);}
@@ -2359,10 +2360,17 @@ function renderFindings(){
   }
   noFindings.classList.add('hidden');
   
-  // Group by file
+  // Group by file — assign a global index to each finding for safe data retrieval
   const byFile = {};
-  filtered.forEach(f => { (byFile[f.file] = byFile[f.file]||[]).push(f); });
-  
+  filtered.forEach((f, i) => {
+    f._idx = i;   // attach render-time index (temporary, not stored in scanResults)
+    (byFile[f.file] = byFile[f.file]||[]).push(f);
+  });
+
+  // Store the currently-rendered filtered findings in a lookup map by index
+  // so copy buttons can retrieve them safely without embedding data in onclick
+  window._renderedFindings = filtered;
+
   container.innerHTML = Object.entries(byFile).map(([file, fileFindings]) => \`
     <div class="glass rounded-xl overflow-hidden">
       <div class="px-4 py-3 bg-[#161b22] border-b border-[#30363d] flex items-center justify-between">
@@ -2372,7 +2380,7 @@ function renderFindings(){
         </div>
         <div class="flex items-center gap-3 ml-3 shrink-0">
           <span class="text-xs text-gray-500">\${fileFindings.length} finding\${fileFindings.length>1?'s':''}</span>
-          <button onclick="copyFileFindings(\${JSON.stringify(file)})" class="copy-btn text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 px-2 py-0.5 rounded border border-[#30363d] hover:border-[#484f58] transition-all" title="Copy all findings from this file"><i class="fas fa-copy text-xs"></i> Copy file</button>
+          <button data-copy-file="\${escAttr(file)}" class="copy-btn text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1 px-2 py-0.5 rounded border border-[#30363d] hover:border-[#484f58] transition-all" title="Copy all findings from this file"><i class="fas fa-copy text-xs"></i> Copy file</button>
         </div>
       </div>
       <div class="divide-y divide-[#30363d]">
@@ -2385,9 +2393,7 @@ function renderFindings(){
 function findingCard(f){
   const sevBg = { critical:'severity-critical', high:'severity-high', medium:'severity-medium', low:'severity-low' };
   const redacted = redactSecret(f.match);
-  const copySecret  = f.match || '';
-  const copySnippet = f.snippet || '';
-  const copyFull    = '[' + f.severity.toUpperCase() + '] ' + f.label + ' | File: ' + f.file + ' (line ' + f.line + ') | Category: ' + f.category + ' | Matched: ' + f.match + ' | Snippet: ' + f.snippet;
+  const idx = f._idx ?? 0;
 
   return \`
     <div class="finding-card \${sevBg[f.severity]} px-4 py-3">
@@ -2403,15 +2409,15 @@ function findingCard(f){
           <p class="text-xs text-gray-500 mb-2">\${escHtml(f.description)}</p>
           <div class="terminal-bg rounded-lg px-3 py-2 mono text-xs overflow-x-auto whitespace-pre-wrap text-gray-300 relative group/snippet">
             \${f.context ? escHtml(f.context) : (f.line > 0 ? f.line + ' │ ' : '') + escHtml(f.snippet)}
-            <button onclick="copyWithFeedback(this,\${JSON.stringify(copySnippet)})" class="copy-btn absolute top-1.5 right-1.5 opacity-0 group-hover/snippet:opacity-100 text-xs text-gray-500 hover:text-gray-200 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] px-2 py-0.5 rounded transition-all" title="Copy snippet"><i class="fas fa-copy"></i></button>
+            <button data-copy-idx="\${idx}" data-copy-type="snippet" class="copy-btn absolute top-1.5 right-1.5 opacity-0 group-hover/snippet:opacity-100 text-xs text-gray-500 hover:text-gray-200 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] px-2 py-0.5 rounded transition-all" title="Copy snippet"><i class="fas fa-copy"></i></button>
           </div>
           <div class="mt-2 flex items-center gap-2 flex-wrap">
             <span class="text-xs text-gray-600 shrink-0">Matched:</span>
-            <code class="text-xs text-red-400 bg-red-500/10 px-2 py-0.5 rounded mono flex-1 min-w-0 truncate" title="\${escHtml(f.match)}">\${escHtml(redacted)}</code>
+            <code class="text-xs text-red-400 bg-red-500/10 px-2 py-0.5 rounded mono flex-1 min-w-0 truncate" title="\${escAttr(f.match)}">\${escHtml(redacted)}</code>
             <div class="copy-group">
-              <button onclick="copyWithFeedback(this,\${JSON.stringify(copySecret)})" class="copy-btn flex items-center gap-1 text-xs text-red-400 hover:text-red-300 bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 hover:border-red-500/40 px-2 py-0.5 rounded transition-all" title="Copy full secret value"><i class="fas fa-key text-xs"></i><span>Secret</span></button>
-              <button onclick="copyWithFeedback(this,\${JSON.stringify(copySnippet)})" class="copy-btn flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] px-2 py-0.5 rounded transition-all" title="Copy snippet line"><i class="fas fa-code text-xs"></i><span>Line</span></button>
-              <button onclick="copyWithFeedback(this,\${JSON.stringify(copyFull)})" class="copy-btn flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] px-2 py-0.5 rounded transition-all" title="Copy full finding details"><i class="fas fa-file-lines text-xs"></i><span>Full</span></button>
+              <button data-copy-idx="\${idx}" data-copy-type="secret" class="copy-btn flex items-center gap-1 text-xs text-red-400 hover:text-red-300 bg-red-500/5 hover:bg-red-500/10 border border-red-500/20 hover:border-red-500/40 px-2 py-0.5 rounded transition-all" title="Copy full secret value"><i class="fas fa-key text-xs"></i><span>Secret</span></button>
+              <button data-copy-idx="\${idx}" data-copy-type="line" class="copy-btn flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] px-2 py-0.5 rounded transition-all" title="Copy snippet line"><i class="fas fa-code text-xs"></i><span>Line</span></button>
+              <button data-copy-idx="\${idx}" data-copy-type="full" class="copy-btn flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 bg-[#21262d] hover:bg-[#30363d] border border-[#30363d] px-2 py-0.5 rounded transition-all" title="Copy full finding details"><i class="fas fa-file-lines text-xs"></i><span>Full</span></button>
             </div>
           </div>
         </div>
@@ -2469,6 +2475,17 @@ function exportResults(){
 function escHtml(s){
   if(!s) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Escape a string for safe use inside an HTML attribute value (e.g. data-*)
+function escAttr(s){
+  if(!s) return '';
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
 }
 
 function copyToClipboard(text){
@@ -2578,6 +2595,78 @@ async function loadPatterns(){
 
 // Enter key to scan
 document.getElementById('github-url').addEventListener('keydown', e => { if(e.key === 'Enter') startGithubScan(); });
+
+// ─── Global delegated copy handler ───────────────────────────────────────────
+// Handles all data-copy-* buttons without inline onclick.
+// pointer-events:none on <i>/<span> children ensures e.target is always the <button>.
+function doCopy(btn){
+  const idx  = parseInt(btn.dataset.copyIdx, 10);
+  const type = btn.dataset.copyType || 'full';
+  const findings = window._renderedFindings;
+
+  if(!findings || isNaN(idx) || idx < 0 || idx >= findings.length){
+    showToast('Nothing to copy — run a scan first', 'error');
+    return;
+  }
+  const f = findings[idx];
+  if(!f){ showToast('Finding not found', 'error'); return; }
+
+  let text = '';
+  if(type === 'secret')       text = f.match   || '';
+  else if(type === 'line')    text = f.snippet  || '';
+  else if(type === 'snippet') text = f.snippet  || '';
+  else if(type === 'full'){
+    text = '[' + (f.severity||'').toUpperCase() + '] ' + (f.label||'')
+      + ' | File: '     + (f.file||'')
+      + ' (line '       + (f.line||0) + ')'
+      + ' | Category: ' + (f.category||'')
+      + ' | Matched: '  + (f.match||'')
+      + ' | Snippet: '  + (f.snippet||'');
+  }
+
+  function feedback(){
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-check"></i> <span>Copied!</span>';
+    btn.classList.add('copied');
+    showToast('Copied to clipboard!', 'success');
+    setTimeout(() => { btn.innerHTML = orig; btn.classList.remove('copied'); }, 1500);
+  }
+
+  if(navigator.clipboard && window.isSecureContext){
+    navigator.clipboard.writeText(text).then(feedback).catch(() => fallbackCopy(text, feedback));
+  } else {
+    fallbackCopy(text, feedback);
+  }
+}
+
+function fallbackCopy(text, cb){
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
+  document.body.appendChild(ta);
+  ta.focus(); ta.select();
+  try { document.execCommand('copy'); if(cb) cb(); }
+  catch(err){ showToast('Copy failed: ' + err, 'error'); }
+  document.body.removeChild(ta);
+}
+
+document.addEventListener('click', function(e){
+  // Walk up from e.target to find a data-copy-idx or data-copy-file button
+  let el = e.target;
+  while(el && el !== document.body){
+    if(el.dataset && el.dataset.copyIdx !== undefined){
+      doCopy(el);
+      e.stopPropagation();
+      return;
+    }
+    if(el.dataset && el.dataset.copyFile !== undefined){
+      copyFileFindings(el.dataset.copyFile);
+      e.stopPropagation();
+      return;
+    }
+    el = el.parentElement;
+  }
+}, true);  // capture phase — fires before any child handler that may stopPropagation
 
 // Init
 loadPatterns();
