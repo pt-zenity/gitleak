@@ -7,7 +7,8 @@ module.exports = {
       cwd: '/home/user/webapp',
       env: {
         NODE_ENV: 'production',
-        PORT: 3000,
+        HTTP_PORT: 80,
+        HTTPS_PORT: 443,
         HOST: '0.0.0.0',
       },
       watch: false,
