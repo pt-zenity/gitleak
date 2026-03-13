@@ -38,6 +38,9 @@ APP_PORT="${PORT:-3000}"
 APP_NAME="gitleakhunter"
 APP_DOMAIN=""
 SSL_EMAIL=""
+CF_ORIGIN_KEY=""
+CF_ORIGIN_CERT=""
+SSL_MODE="auto"
 NODE_MIN=18
 
 # ─── Parse argumen ───────────────────────────────────────────────────────────
@@ -45,8 +48,11 @@ for arg in "$@"; do
   case "$arg" in
     --port=*)    APP_PORT="${arg#*=}" ;;
     --dir=*)     APP_DIR="${arg#*=}" ;;
-    --domain=*)  APP_DOMAIN="${arg#*=}" ;;
-    --email=*)   SSL_EMAIL="${arg#*=}" ;;
+    --domain=*)   APP_DOMAIN="${arg#*=}" ;;
+    --email=*)    SSL_EMAIL="${arg#*=}" ;;
+    --cf-key=*)   CF_ORIGIN_KEY="${arg#*=}" ;;
+    --cf-cert=*)  CF_ORIGIN_CERT="${arg#*=}" ;;
+    --ssl-mode=*) SSL_MODE="${arg#*=}" ;;
     --uninstall|-u)
       echo -e "\n${BOLD}${RED}Uninstall GitLeakHunter...${NC}"
       pm2 delete "$APP_NAME" 2>/dev/null && ok "PM2 process dihapus" || true
@@ -87,19 +93,24 @@ for arg in "$@"; do
     --help|-h)
       echo -e "${BOLD}Penggunaan:${NC} bash install-local.sh [opsi]\n"
       echo -e "  ${CYAN}(tanpa opsi)${NC}              Install & jalankan di port 3000"
-      echo -e "  ${CYAN}--port=NNNN${NC}               Ganti port (default: 3000)"
-      echo -e "  ${CYAN}--dir=/path${NC}               Ganti direktori install (default: ~/gitleakhunter)"
-      echo -e "  ${CYAN}--domain=example.com${NC}      Setup domain + Nginx reverse proxy"
-      echo -e "  ${CYAN}--email=user@example.com${NC}  Email untuk SSL certificate (Let's Encrypt)"
-      echo -e "  ${CYAN}--update${NC}                  Update ke versi terbaru dari GitHub"
-      echo -e "  ${CYAN}--uninstall${NC}               Hapus GitLeakHunter & stop PM2 process"
-      echo -e "  ${CYAN}--help${NC}                    Tampilkan bantuan ini\n"
+      echo -e "  ${CYAN}--port=NNNN${NC}                 Ganti port (default: 3000)"
+      echo -e "  ${CYAN}--dir=/path${NC}                 Ganti direktori install (default: ~/gitleakhunter)"
+      echo -e "  ${CYAN}--domain=example.com${NC}        Setup domain + Nginx reverse proxy"
+      echo -e "  ${CYAN}--email=user@example.com${NC}    Email untuk SSL Let's Encrypt"
+      echo -e "  ${CYAN}--ssl-mode=MODE${NC}             Mode SSL: auto|cloudflare|flexible|letsencrypt (default: auto)"
+      echo -e "  ${CYAN}--cf-key=/path/origin.key${NC}   Path Cloudflare Origin Certificate private key"
+      echo -e "  ${CYAN}--cf-cert=/path/origin.pem${NC}  Path Cloudflare Origin Certificate (PEM)"
+      echo -e "  ${CYAN}--update${NC}                    Update ke versi terbaru dari GitHub"
+      echo -e "  ${CYAN}--uninstall${NC}                 Hapus GitLeakHunter & stop PM2 process"
+      echo -e "  ${CYAN}--help${NC}                      Tampilkan bantuan ini\n"
       echo -e "${BOLD}Contoh:${NC}"
       echo -e "  ${CYAN}bash install-local.sh${NC}"
       echo -e "  ${CYAN}bash install-local.sh --port=8080${NC}"
       echo -e "  ${CYAN}bash install-local.sh --dir=/opt/gitleakhunter${NC}"
       echo -e "  ${CYAN}bash install-local.sh --domain=scan.example.com${NC}"
       echo -e "  ${CYAN}bash install-local.sh --domain=scan.example.com --email=admin@example.com${NC}"
+      echo -e "  ${CYAN}bash install-local.sh --ssl-mode=cloudflare --cf-key=/etc/ssl/cf/origin.key --cf-cert=/etc/ssl/cf/origin.pem${NC}"
+      echo -e "  ${CYAN}bash install-local.sh --ssl-mode=flexible${NC}"
       echo -e "  ${CYAN}bash install-local.sh --update${NC}"
       exit 0
       ;;
@@ -259,6 +270,8 @@ done_step
 
 # ─── Tulis ecosystem PM2 ─────────────────────────────────────────────────────
 step "Membuat konfigurasi PM2"
+CF_KEY_FINAL="${CF_ORIGIN_KEY:-/etc/ssl/cloudflare/origin.key}"
+CF_CERT_FINAL="${CF_ORIGIN_CERT:-/etc/ssl/cloudflare/origin.pem}"
 cat > "$APP_DIR/ecosystem.config.cjs" << ECOEOF
 module.exports = {
   apps: [
@@ -269,8 +282,12 @@ module.exports = {
       cwd: '${APP_DIR}',
       env: {
         NODE_ENV: 'production',
-        PORT: ${APP_PORT},
+        HTTP_PORT: 80,
+        HTTPS_PORT: 443,
         HOST: '0.0.0.0',
+        SSL_MODE: '${SSL_MODE}',
+        CF_ORIGIN_KEY:  '${CF_KEY_FINAL}',
+        CF_ORIGIN_CERT: '${CF_CERT_FINAL}',
       },
       watch: false,
       instances: 1,
@@ -286,14 +303,38 @@ ECOEOF
 ok "Konfigurasi PM2 ditulis ke ecosystem.config.cjs"
 done_step
 
-# ─── Jalankan dengan PM2 ─────────────────────────────────────────────────────
+# ─── Setup Cloudflare Origin Certificate (jika disediakan) ───────────────────
+if [ -n "$CF_ORIGIN_KEY" ] && [ -n "$CF_ORIGIN_CERT" ]; then
+  step "Setup Cloudflare Origin Certificate"
+  CF_DIR=$(dirname "$CF_KEY_FINAL")
+  run_sudo mkdir -p "$CF_DIR" 2>/dev/null || mkdir -p "$CF_DIR"
+  if [ -f "$CF_ORIGIN_KEY" ]; then
+    run_sudo cp "$CF_ORIGIN_KEY" "$CF_KEY_FINAL" 2>/dev/null || cp "$CF_ORIGIN_KEY" "$CF_KEY_FINAL"
+    run_sudo chmod 600 "$CF_KEY_FINAL" 2>/dev/null || chmod 600 "$CF_KEY_FINAL"
+    ok "Origin private key disalin ke $CF_KEY_FINAL"
+  else
+    warn "File key tidak ditemukan: $CF_ORIGIN_KEY"
+  fi
+  if [ -f "$CF_ORIGIN_CERT" ]; then
+    run_sudo cp "$CF_ORIGIN_CERT" "$CF_CERT_FINAL" 2>/dev/null || cp "$CF_ORIGIN_CERT" "$CF_CERT_FINAL"
+    run_sudo chmod 644 "$CF_CERT_FINAL" 2>/dev/null || chmod 644 "$CF_CERT_FINAL"
+    ok "Origin certificate disalin ke $CF_CERT_FINAL"
+  else
+    warn "File cert tidak ditemukan: $CF_ORIGIN_CERT"
+  fi
+  done_step
+fi
+
+
 step "Menjalankan GitLeakHunter"
 
-# Bebaskan port jika sudah terpakai
+# Bebaskan port 80 dan 443
 if command -v fuser &>/dev/null; then
-  fuser -k "${APP_PORT}/tcp" 2>/dev/null || true
+  fuser -k 80/tcp 2>/dev/null || true
+  fuser -k 443/tcp 2>/dev/null || true
 elif command -v lsof &>/dev/null; then
-  lsof -ti:"${APP_PORT}" | xargs kill -9 2>/dev/null || true
+  lsof -ti:80 | xargs kill -9 2>/dev/null || true
+  lsof -ti:443 | xargs kill -9 2>/dev/null || true
 fi
 
 # Hapus proses lama jika ada
@@ -516,14 +557,14 @@ NGINXEOF
 
 # Jalankan setup domain jika --domain diberikan
 if [ -n "$APP_DOMAIN" ]; then
-  setup_nginx "$APP_DOMAIN" "$APP_PORT" "$SSL_EMAIL"
+  setup_nginx "$APP_DOMAIN" "80" "$SSL_EMAIL"
 fi
 
 # ─── Verifikasi port tersedia ─────────────────────────────────────────────────
 sleep 2
-HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:${APP_PORT}/" 2>/dev/null || echo "000")
-if [ "$HTTP_STATUS" = "200" ]; then
-  ok "HTTP check: 200 OK — aplikasi merespons dengan baik"
+HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:80/" 2>/dev/null || echo "000")
+if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "301" ]; then
+  ok "HTTP check: ${HTTP_STATUS} — aplikasi merespons dengan baik"
 else
   warn "HTTP check mengembalikan status ${HTTP_STATUS} (mungkin masih starting up)"
 fi
@@ -534,23 +575,30 @@ echo -e "${BOLD}${GREEN}╔═════════════════�
 echo -e "${BOLD}${GREEN}║        GitLeakHunter berhasil diinstall! 🎉              ║${NC}"
 echo -e "${BOLD}${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "  ${BOLD}🌐 Akses lokal:${NC}      ${BOLD}${CYAN}http://localhost:${APP_PORT}${NC}"
+echo -e "  ${BOLD}🌐 HTTP  (port 80):${NC}   ${BOLD}${CYAN}http://localhost${NC}"
+echo -e "  ${BOLD}🔒 HTTPS (port 443):${NC}  ${BOLD}${GREEN}https://localhost${NC}  ${YELLOW}(jika cert tersedia)${NC}"
 
 # Jika domain dikonfigurasi
 if [ -n "$APP_DOMAIN" ]; then
-  echo -e "  ${BOLD}🔗 Domain HTTP:${NC}     ${BOLD}${CYAN}http://${APP_DOMAIN}${NC}"
-  echo -e "  ${BOLD}🔒 Domain HTTPS:${NC}    ${BOLD}${GREEN}https://${APP_DOMAIN}${NC}"
+  echo -e "  ${BOLD}🔗 Domain HTTP:${NC}      ${BOLD}${CYAN}http://${APP_DOMAIN}${NC}"
+  echo -e "  ${BOLD}🔒 Domain HTTPS:${NC}     ${BOLD}${GREEN}https://${APP_DOMAIN}${NC}"
 fi
 
 # Jika punya IP publik, tampilkan juga
 PUBLIC_IP=$(curl -s --max-time 3 https://api.ipify.org 2>/dev/null || \
             curl -s --max-time 3 https://checkip.amazonaws.com 2>/dev/null || echo "")
 if [ -n "$PUBLIC_IP" ]; then
-  echo -e "  ${BOLD}🌍 Akses dari luar:${NC}  ${CYAN}http://${PUBLIC_IP}:${APP_PORT}${NC}  ${YELLOW}(pastikan firewall/port sudah dibuka)${NC}"
+  echo -e "  ${BOLD}🌍 IP Publik:${NC}         ${CYAN}http://${PUBLIC_IP}${NC}  ${YELLOW}(pastikan port 80/443 dibuka di firewall)${NC}"
 fi
 
-echo -e "  ${BOLD}📁 Direktori:${NC}        ${CYAN}${APP_DIR}${NC}"
-echo -e "  ${BOLD}🔧 Port:${NC}             ${CYAN}${APP_PORT}${NC}"
+echo -e "  ${BOLD}📁 Direktori:${NC}         ${CYAN}${APP_DIR}${NC}"
+echo -e "  ${BOLD}🔧 Port:${NC}              ${CYAN}HTTP:80  HTTPS:443${NC}"
+echo ""
+echo -e "  ${BOLD}${YELLOW}── Mode SSL aktif: ${SSL_MODE} ──────────────────────────────${NC}"
+if [ "$SSL_MODE" = "cloudflare" ] || [ "$SSL_MODE" = "auto" ]; then
+  echo -e "  ${CYAN}Cloudflare Origin Cert key : ${CF_KEY_FINAL}${NC}"
+  echo -e "  ${CYAN}Cloudflare Origin Cert pem : ${CF_CERT_FINAL}${NC}"
+fi
 echo ""
 echo -e "  ${BOLD}${YELLOW}── Perintah PM2 ───────────────────────────────────────${NC}"
 echo -e "  ${CYAN}pm2 status${NC}                      — lihat status semua proses"
