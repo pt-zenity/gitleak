@@ -8,167 +8,127 @@
 
 ---
 
-## ✨ Features
+## ⚡ One-Line Auto Install
 
-- 🔭 **Deep GitHub Scan** — traverses full commit history (up to 100 commits, 250 files)
-- 📦 **ZIP Upload Scanner** — drag & drop `.zip`, `.jar`, `.war`, `.apk` — extract & scan entirely in-browser
-- 📋 **Paste / File Scanner** — paste any code, `.env`, YAML, JSON, PEM files directly
-- 🧠 **33 Detection Patterns** across 10 secret categories:
-  - ☁️ Cloud: AWS, Azure, Google, Firebase, Heroku
-  - 💳 Payment: Stripe (live & restricted)
-  - 🤖 AI: OpenAI
-  - 🐙 VCS: GitHub tokens (classic & fine-grained)
-  - 🔑 Crypto: RSA, SSH, EC, DSA private keys
-  - 📜 TLS/SSL certificates & CSRs
-  - 🗃️ Database connection strings & passwords
-  - 💬 Messaging: Slack, Discord, Telegram, Twilio
-  - 📧 Email: SendGrid
-  - 📦 Package: NPM tokens
-  - 🔒 Generic: passwords, secret keys, JWT tokens
-- ⚡ **High-value files prioritised** — `.env`, `.pem`, `.key`, `credentials` scanned first
-- 🎯 **Entropy filter** — reduces false positives on generic patterns
-- 🔢 **Context lines** — shows surrounding code for each finding
-- 📊 **Severity levels** — Critical / High / Medium / Low with color-coded UI
-- 🔍 **Filter & search** — filter by severity, file, category, or keyword
-- 💾 **Export JSON** — download full scan report
-- 🌃 **Matrix rain** cyberpunk background
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/pt-zenity/gitleak/main/install.sh)
+```
+
+> Installs Node.js, PM2, clones the repo, builds, and starts GitLeakHunter automatically.  
+> Supports: **Ubuntu/Debian · CentOS/RHEL · Arch Linux · macOS**
 
 ---
 
-## 🚀 Quick Start (Cloudflare Pages — Recommended)
+## ✨ Features
 
-### Prerequisites
+- 🔭 **Deep GitHub Scan** — parallel fetch of files + commit history (no file limit, up to 100 commits)
+- 📦 **ZIP Upload Scanner** — drag & drop `.zip`, `.jar`, `.war`, `.apk` — extract & scan entirely in-browser (up to 1000 MB)
+- 📋 **Paste / File Scanner** — paste any code, `.env`, YAML, JSON, PEM files directly
+- 🧠 **33 Detection Patterns** across 10+ secret categories
+- ⚡ **50 concurrent requests** — parallel file scanning with controlled concurrency
+- ⏱️ **Per-request timeout** — stalled requests auto-skip (no more hanging scans)
+- ⛔ **Cancel button** — stop any scan instantly with AbortController
+- 🎯 **Entropy filter** — reduces false positives on generic patterns
+- 🔢 **Context lines** — shows surrounding code for each finding
+- 📊 **Severity levels** — Critical / High / Medium / Low with color-coded UI
+- 📋 **Copy buttons** — copy secret value, snippet, full finding, or all findings
+- 🔔 **Telegram notifications** — auto-send scan results to a Telegram bot
+- 🌃 **Matrix rain** cyberpunk UI
+
+---
+
+## 🚀 Install Methods
+
+### Method 1 — Auto Install Script (Recommended)
+
+```bash
+# Download and run
+bash <(curl -fsSL https://raw.githubusercontent.com/pt-zenity/gitleak/main/install.sh)
+```
+
+**Options:**
+
+```bash
+# Custom port
+bash install.sh --port=8080
+
+# Custom install directory
+bash install.sh --dir=/opt/gitleakhunter
+
+# Deploy to Cloudflare Pages
+export CLOUDFLARE_API_TOKEN=your_cf_token
+bash install.sh --deploy
+
+# Uninstall
+bash install.sh --uninstall
+
+# Show help
+bash install.sh --help
+```
+
+After install, open: **http://localhost:3000**
+
+---
+
+### Method 2 — Manual Install
+
+#### Prerequisites
 
 | Tool | Version | Install |
 |------|---------|---------|
 | Node.js | ≥ 18.x | https://nodejs.org |
 | npm | ≥ 9.x | bundled with Node.js |
 | Git | any | https://git-scm.com |
+| PM2 | latest | `npm install -g pm2` |
+
+#### Steps
+
+```bash
+# 1. Clone
+git clone https://github.com/pt-zenity/gitleak.git
+cd gitleak
+
+# 2. Install dependencies
+npm install
+
+# 3. Build
+npm run build
+
+# 4. Start with PM2
+pm2 start ecosystem.config.cjs
+
+# 5. Open browser
+open http://localhost:3000
+```
+
+#### PM2 Management
+
+```bash
+pm2 status                      # Show running processes
+pm2 logs gitleakhunter          # View live logs
+pm2 restart gitleakhunter       # Restart
+pm2 stop gitleakhunter          # Stop
+pm2 startup && pm2 save         # Auto-start on system reboot
+```
 
 ---
 
-### Step 1 — Clone the repository
+### Method 3 — Development Mode (Hot Reload)
 
 ```bash
 git clone https://github.com/pt-zenity/gitleak.git
 cd gitleak
-```
-
----
-
-### Step 2 — Install dependencies
-
-```bash
 npm install
-```
-
-> This installs: `hono`, `vite`, `wrangler`, `@hono/vite-build`, and TypeScript.
-
----
-
-### Step 3 — Run locally (development mode)
-
-```bash
 npm run dev
 ```
 
-Open your browser at **http://localhost:5173**
+Open: **http://localhost:5173**
 
-> Uses Vite dev server with hot-reload. Changes to `src/index.tsx` are reflected instantly.
-
----
-
-### Step 4 — Build for production
-
-```bash
-npm run build
-```
-
-Output: `dist/_worker.js` (~94 KB) — a single Cloudflare Worker bundle.
+> Uses Vite dev server with instant hot-reload on `src/index.tsx` changes.
 
 ---
 
-### Step 5 — Preview production build locally
-
-```bash
-npm run preview
-```
-
-Opens a local Cloudflare Workers simulation at **http://localhost:8787**
-
----
-
-## ☁️ Deploy to Cloudflare Pages (Free)
-
-### 5.1 — Create a free Cloudflare account
-
-Go to https://dash.cloudflare.com/sign-up and create a free account.
-
----
-
-### 5.2 — Install Wrangler CLI (already included)
-
-```bash
-npx wrangler --version   # should show 4.x
-```
-
----
-
-### 5.3 — Authenticate with Cloudflare
-
-```bash
-npx wrangler login
-```
-
-Your browser will open and ask you to log in to Cloudflare and authorize Wrangler. After approval, return to the terminal.
-
-Verify it worked:
-
-```bash
-npx wrangler whoami
-```
-
----
-
-### 5.4 — Deploy
-
-```bash
-npm run deploy
-```
-
-This runs `npm run build && wrangler pages deploy dist` automatically.
-
-You will receive two URLs:
-
-```
-✅ Deployment complete!
-   Production:  https://gitleak.pages.dev
-   Branch:      https://main.gitleak.pages.dev
-```
-
----
-
-### 5.5 — (Optional) Custom project name
-
-Edit `package.json` and change the deploy script:
-
-```json
-"deploy": "npm run build && wrangler pages deploy dist --project-name YOUR-PROJECT-NAME"
-```
-
-Then run:
-
-```bash
-npm run deploy
-```
-
----
-
-## 🐳 Run with Docker (Alternative)
-
-> Note: Docker runs the Wrangler dev server, not a native Node.js server.
-
-### Dockerfile
+### Method 4 — Docker
 
 ```dockerfile
 FROM node:20-alpine
@@ -177,24 +137,71 @@ COPY package*.json ./
 RUN npm install
 COPY . .
 RUN npm run build
-EXPOSE 8787
-CMD ["npx", "wrangler", "pages", "dev", "dist", "--ip", "0.0.0.0", "--port", "8787"]
+EXPOSE 3000
+CMD ["npx", "wrangler", "pages", "dev", "dist", "--ip", "0.0.0.0", "--port", "3000"]
 ```
-
-### Build & run
 
 ```bash
 docker build -t gitleakhunter .
-docker run -p 8787:8787 gitleakhunter
+docker run -p 3000:3000 gitleakhunter
 ```
-
-Open: **http://localhost:8787**
 
 ---
 
-## 🛠️ Development Workflow
+## ☁️ Deploy to Cloudflare Pages (Free)
 
-### Project structure
+### Step 1 — Create Cloudflare account
+
+https://dash.cloudflare.com/sign-up (free, no credit card needed)
+
+### Step 2 — Get API Token
+
+1. Go to https://dash.cloudflare.com/profile/api-tokens
+2. Click **Create Token** → Use template **Edit Cloudflare Workers**
+3. Copy the token
+
+### Step 3 — Deploy
+
+```bash
+export CLOUDFLARE_API_TOKEN=your_token_here
+npm run deploy
+```
+
+**Or use the auto install script:**
+
+```bash
+export CLOUDFLARE_API_TOKEN=your_token_here
+bash install.sh --deploy
+```
+
+You'll receive:
+```
+✅ Deployment complete!
+   Production:  https://gitleakhunter.pages.dev
+   Branch:      https://main.gitleakhunter.pages.dev
+```
+
+---
+
+## ♻️ Update to Latest Version
+
+```bash
+cd ~/gitleakhunter
+git pull
+npm install
+npm run build
+pm2 restart gitleakhunter
+```
+
+**Or re-run the install script** (it auto-pulls latest):
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/pt-zenity/gitleak/main/install.sh)
+```
+
+---
+
+## 🛠️ Project Structure
 
 ```
 gitleak/
@@ -202,7 +209,8 @@ gitleak/
 │   └── index.tsx          # All backend routes + frontend HTML (Hono app)
 ├── public/                # Static assets
 ├── dist/                  # Built output (auto-generated, gitignored)
-├── ecosystem.config.cjs   # PM2 config (for sandbox/server deployment)
+├── install.sh             # ← Auto install script
+├── ecosystem.config.cjs   # PM2 config
 ├── wrangler.jsonc         # Cloudflare Workers/Pages config
 ├── vite.config.ts         # Vite + Hono build config
 ├── tsconfig.json          # TypeScript config
@@ -222,106 +230,49 @@ gitleak/
 
 ## 🔌 API Reference
 
-All endpoints are part of the same Cloudflare Worker.
-
 ### `POST /api/scan/github`
 
-Scan a GitHub repository for secrets.
-
-**Request:**
 ```json
-{
-  "url": "https://github.com/owner/repository"
-}
+{ "url": "https://github.com/owner/repository" }
 ```
 
-**Response:**
+Response:
 ```json
 {
   "success": true,
   "meta": {
-    "repo": "owner/repository",
-    "branch": "main",
-    "scannedFiles": 47,
-    "totalFiles": 120,
-    "totalFindings": 3,
-    "commits": 50,
-    "elapsed": "4.2",
-    "platform": "github"
+    "repo": "owner/repo", "branch": "main",
+    "scannedFiles": 47, "totalFiles": 120,
+    "totalFindings": 3, "commits": 100, "elapsed": "4.2"
   },
   "findings": [
     {
-      "patternId": "aws_access_key",
-      "label": "AWS Access Key ID",
-      "category": "Cloud Credentials",
-      "severity": "critical",
-      "icon": "☁️",
-      "description": "Amazon Web Services Access Key ID",
-      "file": ".env",
-      "line": 3,
+      "patternId": "aws_access_key", "label": "AWS Access Key ID",
+      "category": "Cloud Credentials", "severity": "critical",
+      "file": ".env", "line": 3,
       "snippet": "AWS_ACCESS_KEY_ID=AKIA...",
-      "context": "2│ # AWS config\n3│ AWS_ACCESS_KEY_ID=AKIA...\n4│ AWS_DEFAULT_REGION=us-east-1",
-      "match": "AKIA****EXAMPLE",
-      "entropy": 3.58
+      "context": "2│ # AWS\n3│ AWS_ACCESS_KEY_ID=AKIA...\n4│ REGION=us-east-1",
+      "match": "AKIAIOSFODNN7EXAMPLE", "entropy": 3.58
     }
   ]
 }
 ```
 
----
-
 ### `POST /api/scan/text`
 
-Scan pasted text or file content.
-
-**Request:**
 ```json
-{
-  "content": "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\nDB_PASSWORD=hunter2",
-  "filename": "config.env"
-}
+{ "content": "DB_PASSWORD=hunter2", "filename": "config.env" }
 ```
-
-**Response:** same shape as `/api/scan/github` with `meta.scannedFiles = 1`.
-
----
 
 ### `POST /api/scan/zip`
 
-Scan files extracted from a ZIP archive (called from frontend after browser-side extraction with JSZip).
-
-**Request:**
 ```json
-{
-  "files": [
-    { "name": ".env", "content": "AWS_ACCESS_KEY_ID=AKIA..." },
-    { "name": "config/database.yml", "content": "password: hunter2" }
-  ]
-}
+{ "files": [{ "name": ".env", "content": "AWS_KEY=AKIA..." }] }
 ```
-
-**Response:** same shape, with additional `scannedList` and `skippedList` arrays.
-
----
 
 ### `GET /api/patterns`
 
-Returns the full list of 33 detection pattern definitions.
-
-**Response:**
-```json
-[
-  {
-    "id": "aws_access_key",
-    "label": "AWS Access Key ID",
-    "category": "Cloud Credentials",
-    "severity": "critical",
-    "icon": "☁️",
-    "description": "Amazon Web Services Access Key ID"
-  },
-  ...
-]
-```
+Returns all 33 detection pattern definitions.
 
 ---
 
@@ -365,31 +316,12 @@ Returns the full list of 33 detection pattern definitions.
 
 ---
 
-## ⚙️ Configuration
-
-### Scan limits (editable in `src/index.tsx`)
-
-```typescript
-const MAX_FILES   = 250    // max files scanned per GitHub repo
-const MAX_COMMITS = 100    // max commits analyzed per repo
-const MAX_FILE_SIZE = 150_000  // skip files > 150 KB
-```
-
-### Scan concurrency
-
-```typescript
-const BATCH = 20  // parallel file fetches (GitHub)
-```
-
----
-
 ## 🔒 Security Notes
 
-- **No credentials stored** — this tool never saves API keys, tokens, or scan results server-side
-- **Public repos only** — GitHub API is called without authentication (60 req/hour rate limit per IP)
-- **ZIP processing in browser** — ZIP extraction happens client-side with JSZip; file contents are sent to the Worker only for pattern matching
-- **For authorized use only** — only scan repositories you own or have explicit permission to audit
-- **Demo data** — the built-in demo content uses clearly-labeled fake/placeholder values for testing
+- **No credentials stored** — nothing is saved server-side
+- **Public repos only** — uses unauthenticated GitHub API (60 req/hour per IP)
+- **ZIP processing in browser** — extraction is 100% client-side with JSZip
+- **For authorized use only** — only scan repos you own or have permission to audit
 
 ---
 
