@@ -1,340 +1,317 @@
-# 🔍 GitLeakHunter
+# GitLeakHunter 🔍
 
-> **Git Secret Scanner** — Scan GitHub repositories and files for leaked API keys, passwords, private keys, certificates, and database credentials before attackers find them.
+**Scanner rahasia (secrets) di repositori Git, file ZIP, dan teks langsung.**  
+Deteksi API key, password, token, dan credential yang ter-expose sebelum terjadi kebocoran data.
 
-[![Cloudflare Pages](https://img.shields.io/badge/Deployed%20on-Cloudflare%20Pages-F38020?logo=cloudflare&logoColor=white)](https://pages.cloudflare.com/)
-[![Hono](https://img.shields.io/badge/Framework-Hono-E36002?logo=hono&logoColor=white)](https://hono.dev/)
-[![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-
----
-
-## ⚡ One-Line Auto Install
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/pt-zenity/gitleak/main/install.sh)
+```
+  ██████╗ ██╗████████╗██╗     ███████╗ █████╗ ██╗  ██╗
+ ██╔════╝ ██║╚══██╔══╝██║     ██╔════╝██╔══██╗██║ ██╔╝
+ ██║  ███╗██║   ██║   ██║     █████╗  ███████║█████╔╝
+ ██║   ██║██║   ██║   ██║     ██╔══╝  ██╔══██║██╔═██╗
+ ╚██████╔╝██║   ██║   ███████╗███████╗██║  ██║██║  ██╗
+  ╚═════╝ ╚═╝   ╚═╝   ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝
 ```
 
-> Installs Node.js, PM2, clones the repo, builds, and starts GitLeakHunter automatically.  
-> Supports: **Ubuntu/Debian · CentOS/RHEL · Arch Linux · macOS**
+---
+
+## ✨ Fitur Utama
+
+| Fitur | Keterangan |
+|-------|-----------|
+| 🐙 **GitHub Scan** | Scan seluruh repo GitHub publik (source + commit history) |
+| 📦 **ZIP Scan** | Upload file `.zip` untuk scan offline |
+| 📝 **Text Scan** | Paste teks/config langsung untuk dianalisis |
+| 📊 **33 Pattern** | AWS, GCP, Azure, OpenAI, GitHub, JWT, SSH, database URL, dll |
+| ⚡ **Fast** | 80 concurrent workers, pre-filter QUICK_FILTER_RE, streaming results |
+| 📋 **Copy Buttons** | Copy secret / snippet / full detail finding (Secret · Line · Full) |
+| 🔔 **Notifikasi** | Browser notification + Telegram alert setelah scan selesai |
+| 📜 **History** | Riwayat scan tersimpan di localStorage |
+| 🌐 **HTTPS Ready** | Auto-detect SSL: Cloudflare Origin Cert / Let's Encrypt / custom cert |
 
 ---
 
-## ✨ Features
+## 🚀 Cara Install
 
-- 🔭 **Deep GitHub Scan** — parallel fetch of files + commit history (no file limit, up to 100 commits)
-- 📦 **ZIP Upload Scanner** — drag & drop `.zip`, `.jar`, `.war`, `.apk` — extract & scan entirely in-browser (up to 1000 MB)
-- 📋 **Paste / File Scanner** — paste any code, `.env`, YAML, JSON, PEM files directly
-- 🧠 **33 Detection Patterns** across 10+ secret categories
-- ⚡ **50 concurrent requests** — parallel file scanning with controlled concurrency
-- ⏱️ **Per-request timeout** — stalled requests auto-skip (no more hanging scans)
-- ⛔ **Cancel button** — stop any scan instantly with AbortController
-- 🎯 **Entropy filter** — reduces false positives on generic patterns
-- 🔢 **Context lines** — shows surrounding code for each finding
-- 📊 **Severity levels** — Critical / High / Medium / Low with color-coded UI
-- 📋 **Copy buttons** — copy secret value, snippet, full finding, or all findings
-- 🔔 **Telegram notifications** — auto-send scan results to a Telegram bot
-- 🌃 **Matrix rain** cyberpunk UI
-
----
-
-## 🚀 Install Methods
-
-### Method 1 — Auto Install Script (Recommended)
+### Metode 1 — One-Line Installer (Direkomendasikan)
 
 ```bash
-# Download and run
-bash <(curl -fsSL https://raw.githubusercontent.com/pt-zenity/gitleak/main/install.sh)
+curl -fsSL https://raw.githubusercontent.com/pt-zenity/gitleak/main/install.sh | bash
 ```
 
-**Options:**
-
-```bash
-# Custom port
-bash install.sh --port=8080
-
-# Custom install directory
-bash install.sh --dir=/opt/gitleakhunter
-
-# Deploy to Cloudflare Pages
-export CLOUDFLARE_API_TOKEN=your_cf_token
-bash install.sh --deploy
-
-# Uninstall
-bash install.sh --uninstall
-
-# Show help
-bash install.sh --help
-```
-
-After install, open: **http://localhost:3000**
+Script ini otomatis:
+- Install Node.js 18+ (jika belum ada)
+- Install PM2 secara global
+- Clone repo ke `~/gitleakhunter`
+- Install dependencies (`npm install`)
+- Build project (`npm run build`)
+- Start server via PM2 (port 3000)
 
 ---
 
-### Method 2 — Manual Install
+### Metode 2 — Manual Step-by-Step
 
-#### Prerequisites
+#### Prasyarat
+- **Node.js** v18 atau lebih baru → [nodejs.org](https://nodejs.org)
+- **npm** v8+ (biasanya sudah bundled bersama Node.js)
+- **Git** → [git-scm.com](https://git-scm.com)
 
-| Tool | Version | Install |
-|------|---------|---------|
-| Node.js | ≥ 18.x | https://nodejs.org |
-| npm | ≥ 9.x | bundled with Node.js |
-| Git | any | https://git-scm.com |
-| PM2 | latest | `npm install -g pm2` |
-
-#### Steps
+#### Langkah Instalasi
 
 ```bash
-# 1. Clone
+# 1. Clone repositori
 git clone https://github.com/pt-zenity/gitleak.git
 cd gitleak
 
 # 2. Install dependencies
 npm install
 
-# 3. Build
+# 3. Build project (kompilasi TypeScript → JavaScript)
 npm run build
 
-# 4. Start with PM2
-pm2 start ecosystem.config.cjs
-
-# 5. Open browser
-open http://localhost:3000
+# 4. Jalankan server
+npm start
 ```
 
-#### PM2 Management
-
-```bash
-pm2 status                      # Show running processes
-pm2 logs gitleakhunter          # View live logs
-pm2 restart gitleakhunter       # Restart
-pm2 stop gitleakhunter          # Stop
-pm2 startup && pm2 save         # Auto-start on system reboot
-```
+Server berjalan di **http://localhost:3000**
 
 ---
 
-### Method 3 — Development Mode (Hot Reload)
+### Metode 3 — Dengan PM2 (Production / Auto-restart)
+
+PM2 menjaga server tetap berjalan bahkan setelah reboot atau crash.
 
 ```bash
+# Install PM2 secara global (sekali saja)
+npm install -g pm2
+
+# Clone dan build
 git clone https://github.com/pt-zenity/gitleak.git
 cd gitleak
 npm install
-npm run dev
-```
-
-Open: **http://localhost:5173**
-
-> Uses Vite dev server with instant hot-reload on `src/index.tsx` changes.
-
----
-
-### Method 4 — Docker
-
-```dockerfile
-FROM node:20-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm install
-COPY . .
-RUN npm run build
-EXPOSE 3000
-CMD ["npx", "wrangler", "pages", "dev", "dist", "--ip", "0.0.0.0", "--port", "3000"]
-```
-
-```bash
-docker build -t gitleakhunter .
-docker run -p 3000:3000 gitleakhunter
-```
-
----
-
-## ☁️ Deploy to Cloudflare Pages (Free)
-
-### Step 1 — Create Cloudflare account
-
-https://dash.cloudflare.com/sign-up (free, no credit card needed)
-
-### Step 2 — Get API Token
-
-1. Go to https://dash.cloudflare.com/profile/api-tokens
-2. Click **Create Token** → Use template **Edit Cloudflare Workers**
-3. Copy the token
-
-### Step 3 — Deploy
-
-```bash
-export CLOUDFLARE_API_TOKEN=your_token_here
-npm run deploy
-```
-
-**Or use the auto install script:**
-
-```bash
-export CLOUDFLARE_API_TOKEN=your_token_here
-bash install.sh --deploy
-```
-
-You'll receive:
-```
-✅ Deployment complete!
-   Production:  https://gitleakhunter.pages.dev
-   Branch:      https://main.gitleakhunter.pages.dev
-```
-
----
-
-## ♻️ Update to Latest Version
-
-```bash
-cd ~/gitleakhunter
-git pull
-npm install
 npm run build
-pm2 restart gitleakhunter
+
+# Start dengan PM2
+pm2 start ecosystem.config.cjs
+
+# (Opsional) Aktifkan auto-start saat sistem reboot
+pm2 save
+pm2 startup
+# Jalankan perintah yang muncul dari output 'pm2 startup'
 ```
 
-**Or re-run the install script** (it auto-pulls latest):
+#### Perintah PM2 yang Berguna
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/pt-zenity/gitleak/main/install.sh)
+pm2 status               # Cek status semua proses
+pm2 logs gitleakhunter   # Lihat log real-time
+pm2 logs --nostream      # Lihat log tanpa blocking
+pm2 restart gitleakhunter # Restart server
+pm2 stop gitleakhunter   # Stop server
+pm2 delete gitleakhunter # Hapus dari PM2
 ```
 
 ---
 
-## 🛠️ Project Structure
+### Metode 4 — Docker (Opsional)
 
+```bash
+# Build image
+docker build -t gitleakhunter .
+
+# Run container
+docker run -d \
+  --name gitleakhunter \
+  -p 3000:3000 \
+  --restart unless-stopped \
+  gitleakhunter
+
+# Akses di http://localhost:3000
 ```
-gitleak/
-├── src/
-│   └── index.tsx          # All backend routes + frontend HTML (Hono app)
-├── public/                # Static assets
-├── dist/                  # Built output (auto-generated, gitignored)
-├── install.sh             # ← Auto install script
-├── ecosystem.config.cjs   # PM2 config
-├── wrangler.jsonc         # Cloudflare Workers/Pages config
-├── vite.config.ts         # Vite + Hono build config
-├── tsconfig.json          # TypeScript config
-└── package.json           # Scripts & dependencies
-```
-
-### Available scripts
-
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start Vite dev server (hot-reload, port 5173) |
-| `npm run build` | Build production bundle → `dist/` |
-| `npm run preview` | Preview production build with Wrangler (port 8787) |
-| `npm run deploy` | Build + deploy to Cloudflare Pages |
 
 ---
 
-## 🔌 API Reference
+## ⚙️ Konfigurasi
 
-### `POST /api/scan/github`
+### Port
 
-```json
-{ "url": "https://github.com/owner/repository" }
-```
+Edit file `ecosystem.config.cjs`, ubah nilai `HTTP_PORT`:
 
-Response:
-```json
-{
-  "success": true,
-  "meta": {
-    "repo": "owner/repo", "branch": "main",
-    "scannedFiles": 47, "totalFiles": 120,
-    "totalFindings": 3, "commits": 100, "elapsed": "4.2"
-  },
-  "findings": [
-    {
-      "patternId": "aws_access_key", "label": "AWS Access Key ID",
-      "category": "Cloud Credentials", "severity": "critical",
-      "file": ".env", "line": 3,
-      "snippet": "AWS_ACCESS_KEY_ID=AKIA...",
-      "context": "2│ # AWS\n3│ AWS_ACCESS_KEY_ID=AKIA...\n4│ REGION=us-east-1",
-      "match": "AKIAIOSFODNN7EXAMPLE", "entropy": 3.58
-    }
-  ]
+```js
+env: {
+  HTTP_PORT: 3000,   // ← ganti sesuai kebutuhan
+  ...
 }
 ```
 
-### `POST /api/scan/text`
+Atau gunakan environment variable saat menjalankan langsung:
 
-```json
-{ "content": "DB_PASSWORD=hunter2", "filename": "config.env" }
+```bash
+HTTP_PORT=8080 npm start
 ```
 
-### `POST /api/scan/zip`
+### HTTPS / SSL
 
-```json
-{ "files": [{ "name": ".env", "content": "AWS_KEY=AKIA..." }] }
+GitLeakHunter mendukung 4 mode SSL, dikonfigurasi via `SSL_MODE`:
+
+| Mode | Keterangan |
+|------|-----------|
+| `auto` | Auto-detect: Cloudflare Cert → Custom → Let's Encrypt → HTTP only |
+| `cloudflare` | Cloudflare Origin Certificate (Full/Full Strict) |
+| `letsencrypt` | Let's Encrypt (butuh domain publik) |
+| `custom` | Sertifikat SSL kustom milik sendiri |
+| `flexible` | HTTP only — Cloudflare handle HTTPS (Flexible SSL) |
+
+#### Contoh: Cloudflare Origin Certificate
+
+```js
+// ecosystem.config.cjs
+env: {
+  SSL_MODE: 'cloudflare',
+  CF_ORIGIN_KEY:  '/etc/ssl/cloudflare/origin.key',
+  CF_ORIGIN_CERT: '/etc/ssl/cloudflare/origin.pem',
+  HTTP_PORT:  80,
+  HTTPS_PORT: 443,
+}
 ```
 
-### `GET /api/patterns`
+> Download certificate dari: Cloudflare Dashboard → SSL/TLS → Origin Server → Create Certificate
 
-Returns all 33 detection pattern definitions.
+#### Contoh: Let's Encrypt
+
+```js
+env: {
+  SSL_MODE: 'letsencrypt',
+  DOMAIN: 'scanner.yourdomain.com',
+  HTTP_PORT:  80,
+  HTTPS_PORT: 443,
+}
+```
+
+#### Contoh: Custom Certificate
+
+```js
+env: {
+  SSL_MODE: 'custom',
+  SSL_KEY:  '/path/to/privkey.pem',
+  SSL_CERT: '/path/to/fullchain.pem',
+  HTTP_PORT:  80,
+  HTTPS_PORT: 443,
+}
+```
 
 ---
 
-## 🧩 Detection Patterns (33 total)
+## 📖 Cara Penggunaan
 
-| # | Pattern | Category | Severity |
-|---|---------|----------|----------|
-| 1 | AWS Access Key ID | Cloud Credentials | 🔴 Critical |
-| 2 | AWS Secret Access Key | Cloud Credentials | 🔴 Critical |
-| 3 | OpenAI API Key | AI Service Keys | 🔴 Critical |
-| 4 | Google API Key | Cloud Credentials | 🟠 High |
-| 5 | Google OAuth Token | OAuth Tokens | 🟠 High |
-| 6 | GitHub Token (fine-grained) | VCS Tokens | 🔴 Critical |
-| 7 | GitHub Classic Token | VCS Tokens | 🔴 Critical |
-| 8 | Stripe Secret Key | Payment Keys | 🔴 Critical |
-| 9 | Stripe Restricted Key | Payment Keys | 🟠 High |
-| 10 | Slack Token | Messaging Tokens | 🟠 High |
-| 11 | Slack Webhook URL | Messaging Tokens | 🟡 Medium |
-| 12 | RSA Private Key | Cryptographic Keys | 🔴 Critical |
-| 13 | SSH Private Key (OpenSSH) | Cryptographic Keys | 🔴 Critical |
-| 14 | EC Private Key | Cryptographic Keys | 🔴 Critical |
-| 15 | DSA Private Key | Cryptographic Keys | 🔴 Critical |
-| 16 | TLS/SSL Certificate | Certificates | 🟡 Medium |
-| 17 | Certificate Signing Request | Certificates | 🟢 Low |
-| 18 | PKCS#12 / PFX Certificate | Certificates | 🔴 Critical |
-| 19 | Database Password | Database Credentials | 🟠 High |
-| 20 | Database Connection String | Database Credentials | 🔴 Critical |
-| 21 | Generic Password | Passwords | 🟡 Medium |
-| 22 | Generic Secret / Token | Passwords | 🟡 Medium |
-| 23 | JWT Token | Auth Tokens | 🟠 High |
-| 24 | Twilio Account SID | Messaging Tokens | 🟠 High |
-| 25 | Twilio Auth Token | Messaging Tokens | 🔴 Critical |
-| 26 | SendGrid API Key | Email Service Keys | 🟠 High |
-| 27 | Azure Storage Account Key | Cloud Credentials | 🔴 Critical |
-| 28 | Heroku API Key | Cloud Credentials | 🟠 High |
-| 29 | NPM Access Token | Package Registry Tokens | 🟠 High |
-| 30 | Discord Bot Token | Messaging Tokens | 🟠 High |
-| 31 | Telegram Bot Token | Messaging Tokens | 🟠 High |
-| 32 | Firebase API Key | Cloud Credentials | 🟠 High |
-| 33 | Private Key Passphrase | Cryptographic Keys | 🟠 High |
+### 1. GitHub Scan
+1. Buka browser ke `http://localhost:3000`
+2. Tab **GitHub** sudah aktif secara default
+3. Masukkan URL repositori GitHub, contoh:
+   ```
+   https://github.com/username/repo-name
+   ```
+4. Klik tombol **Scan Repository**
+5. Tunggu proses scan — ada progress bar dengan estimasi tahap
+6. Hasil muncul otomatis dengan severity: Critical / High / Medium / Low
+
+### 2. ZIP Scan
+1. Klik tab **ZIP**
+2. Drag & drop file `.zip` atau klik untuk memilih file
+3. Klik **Scan for Secrets**
+4. Mendukung ZIP dari project apapun (Node.js, Python, Java, dll)
+
+### 3. Text Scan
+1. Klik tab **Text**
+2. Paste konten file (`.env`, config, source code, dll)
+3. Klik **Scan Content**
+4. Hasil instan dalam < 1 detik
+
+### 4. Tombol Copy di Hasil Scan
+Setiap finding memiliki 3 tombol copy:
+- **Secret** — copy nilai secret/token mentah
+- **Line** — copy baris kode yang mengandung secret
+- **Full** — copy detail lengkap (severity, file, line, category, matched, snippet)
+
+### 5. Notifikasi Telegram (Opsional)
+1. Buat bot via [@BotFather](https://t.me/BotFather) di Telegram
+2. Dapatkan **Bot Token** dan **Chat ID**
+3. Klik ikon ⚙️ (Settings) di pojok kanan atas
+4. Masukkan Bot Token dan Chat ID
+5. Klik **Test** untuk verifikasi
+6. Aktifkan toggle **Auto-notify**
 
 ---
 
-## 🔒 Security Notes
+## 🔍 Pattern yang Dideteksi (33 total)
 
-- **No credentials stored** — nothing is saved server-side
-- **Public repos only** — uses unauthenticated GitHub API (60 req/hour per IP)
-- **ZIP processing in browser** — extraction is 100% client-side with JSZip
-- **For authorized use only** — only scan repos you own or have permission to audit
+| Kategori | Pattern |
+|----------|---------|
+| ☁️ Cloud Credentials | AWS Access Key ID, AWS Secret Key, GCP API Key, Azure Storage Key |
+| 🤖 AI Services | OpenAI API Key, Anthropic API Key |
+| 🐙 Version Control | GitHub Personal Token, GitHub OAuth, GitLab Token |
+| 💳 Payment | Stripe Secret Key, Stripe Publishable Key |
+| 💬 Communication | Slack Bot Token, Slack Webhook, Twilio Credentials, SendGrid Key |
+| 🔑 Generic | Generic API Key, Generic Secret, Generic Password, Generic Token |
+| 📜 Crypto | RSA Private Key, DSA Private Key, EC Private Key, PGP Key |
+| 🗃️ Database | Database Connection URL (PostgreSQL, MySQL, MongoDB, Redis) |
+| 🔒 Auth | JWT Token, Basic Auth Credentials |
+| 🎫 Other | Heroku API Key, NPM Token, Firebase Key, Mailgun Key, Twilio Token |
+
+---
+
+## 🏗️ Struktur Proyek
+
+```
+gitleakhunter/
+├── src/
+│   ├── index.tsx      # Backend API (Hono) + Frontend HTML/JS (semua dalam 1 file)
+│   └── server.ts      # Node.js HTTP/HTTPS server dengan SSL support
+├── dist/              # Output build TypeScript (di-generate oleh npm run build)
+│   ├── index.js       # Compiled backend + frontend
+│   └── server.js      # Compiled server
+├── public/            # Static assets
+├── ecosystem.config.cjs  # Konfigurasi PM2
+├── install.sh         # One-line installer script
+├── package.json       # Dependencies
+├── tsconfig.json      # TypeScript config
+└── README.md          # Dokumentasi ini
+```
+
+---
+
+## 🛠️ Development
+
+```bash
+# Mode development dengan hot-reload
+npm run dev
+
+# Build ulang setelah perubahan
+npm run build
+
+# Jalankan hasil build
+npm start
+```
+
+---
+
+## 📋 Requirements
+
+| Dependency | Versi Minimum | Keterangan |
+|-----------|---------------|-----------|
+| Node.js | v18.0.0 | Runtime JavaScript |
+| npm | v8.0.0 | Package manager |
+| Hono | v4.12.7 | Web framework |
+| @hono/node-server | v1.13.7 | Node.js adapter |
+
+---
+
+## 🔗 Links
+
+- **Repository**: https://github.com/pt-zenity/gitleak
+- **Issues**: https://github.com/pt-zenity/gitleak/issues
 
 ---
 
 ## 📄 License
 
-MIT License — free to use, modify, and distribute.
-
----
-
-## 🙏 Acknowledgements
-
-- [Hono](https://hono.dev/) — ultra-fast web framework
-- [Cloudflare Pages](https://pages.cloudflare.com/) — edge deployment platform
-- [JSZip](https://stuk.github.io/jszip/) — client-side ZIP processing
-- [TruffleHog](https://github.com/trufflesecurity/trufflehog) — inspiration for pattern design
-- [TailwindCSS](https://tailwindcss.com/) — utility-first CSS
+MIT License — bebas digunakan, dimodifikasi, dan didistribusikan.
