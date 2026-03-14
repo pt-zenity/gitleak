@@ -468,7 +468,12 @@ function parseGithubUrl(url: string): { owner: string; repo: string } | null {
 // Prioritised high-value file patterns (scanned first, so critical findings surface fast)
 const HIGH_VALUE_PATHS = /(\.(env|pem|key|p12|pfx|jks|cer|crt)|\.env\.|id_rsa|id_dsa|id_ecdsa|id_ed25519|credentials|secrets|\.npmrc|\.netrc|htpasswd|\.gitcredentials|database\.yml|database\.yaml|secrets\.yml|config\.yml|application\.properties|settings\.py|wp-config\.php|LocalSettings\.php|Dockerfile|\.travis\.yml|circle\.ci|\.github\/workflows)/i
 
+// Extensions to scan — files WITH a matching extension
 const SCAN_EXTENSIONS = /\.(env|json|yaml|yml|toml|ini|cfg|conf|config|properties|xml|sh|bash|zsh|py|js|ts|jsx|tsx|rb|go|php|java|cs|cpp|c|h|tf|tfvars|pem|key|crt|cer|p12|pfx|jks|txt|md|gradle|htpasswd|npmrc|netrc|gitcredentials)$/i
+
+// Files WITHOUT an extension that should always be scanned (e.g. 'keys', 'Makefile', 'Procfile')
+// A filename has no extension when its basename contains no dot, or starts with a dot (hidden file)
+const NO_EXT_ALLOWLIST = /(?:^|\/)(keys|credentials|secrets|token|tokens|password|passwords|passwd|auth|config|Makefile|Dockerfile|Procfile|Jenkinsfile|Brewfile|Berksfile|Gemfile|Rakefile|Guardfile|Fastfile|Appfile|id_rsa|id_dsa|id_ecdsa|id_ed25519|authorized_keys|known_hosts|netrc|npmrc|htpasswd|curlrc|wgetrc|s3cfg|pgpass)$/i
 const SKIP_DIRS       = /^(node_modules|\.git|dist|build|vendor|\.next|\.nuxt|coverage|__pycache__|\.venv|venv|\.cache|\.parcel-cache|target|out|\.gradle|\.mvn)\//
 const MAX_FILES       = Infinity
 const MAX_COMMITS     = 50   // 50 commits: cukup untuk coverage, lebih cepat dari 100
@@ -514,7 +519,11 @@ async function fetchGithubTree(owner: string, repo: string): Promise<{ files: { 
     if (item.type !== 'blob') continue
     if (SKIP_DIRS.test(item.path)) continue
     if (item.size > MAX_FILE_SIZE) continue
-    if (!SCAN_EXTENSIONS.test(item.path)) continue
+    // Accept files that: (a) match a known extension OR (b) are on the no-extension allowlist
+    const hasKnownExt = SCAN_EXTENSIONS.test(item.path)
+    const hasNoExt    = !item.path.includes('.') || /\/[^./]+$/.test(item.path)
+    const isAllowed   = hasKnownExt || (hasNoExt && NO_EXT_ALLOWLIST.test(item.path))
+    if (!isAllowed) continue
     const entry = { path: item.path, size: item.size ?? 0 }
     if (HIGH_VALUE_PATHS.test(item.path)) highValue.push(entry)
     else files.push(entry)

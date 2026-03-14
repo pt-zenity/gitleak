@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║          GitLeakHunter — Auto Install Script                    ║
-# ║  Supports: Ubuntu/Debian · CentOS/RHEL · macOS · Arch Linux    ║
-# ║  Modes:  local (PM2)  |  Cloudflare Pages (wrangler deploy)    ║
+# ║  Supports: Ubuntu/Debian · CentOS/RHEL · macOS · Arch · Alpine ║
+# ║  Node.js: installed via nvm (v24 LTS)                          ║
 # ╚══════════════════════════════════════════════════════════════════╝
 set -euo pipefail
 
@@ -26,33 +26,29 @@ cat << 'BANNER'
  ╚██████╔╝██║   ██║   ███████╗███████╗██║  ██║██║  ██╗
   ╚═════╝ ╚═╝   ╚═╝   ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝
 BANNER
-echo -e "${NC}${BOLD}         Hunter — Git Secret Scanner v1.0${NC}"
+echo -e "${NC}${BOLD}         Hunter — Git Secret Scanner v2.0${NC}"
 echo -e "${CYAN}    https://github.com/pt-zenity/gitleak${NC}\n"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 REPO_URL="https://github.com/pt-zenity/gitleak.git"
 APP_DIR="${INSTALL_DIR:-$HOME/gitleakhunter}"
 APP_PORT="${PORT:-3000}"
-NODE_MIN_VERSION=18
-
-# ── Helper: compare versions ─────────────────────────────────────────────────
-version_gte() {
-  # Returns 0 (true) if $1 >= $2
-  [ "$(printf '%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]
-}
+NODE_TARGET_LTS="lts/*"      # installs latest LTS (currently v24)
+NVM_VERSION="v0.40.3"
+NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 
 # ── Detect OS ─────────────────────────────────────────────────────────────────
 detect_os() {
-  if [[ "$OSTYPE" == "darwin"* ]]; then
+  if [[ "${OSTYPE:-}" == "darwin"* ]]; then
     OS="macos"
   elif [ -f /etc/os-release ]; then
     . /etc/os-release
-    case "$ID" in
-      ubuntu|debian|linuxmint|pop)  OS="debian" ;;
-      centos|rhel|fedora|rocky|alma) OS="rhel" ;;
-      arch|manjaro|endeavouros)      OS="arch" ;;
-      alpine)                        OS="alpine" ;;
-      *)                             OS="unknown" ;;
+    case "${ID:-}" in
+      ubuntu|debian|linuxmint|pop|raspbian) OS="debian" ;;
+      centos|rhel|fedora|rocky|alma)        OS="rhel"   ;;
+      arch|manjaro|endeavouros)             OS="arch"   ;;
+      alpine)                               OS="alpine" ;;
+      *)                                    OS="unknown" ;;
     esac
   else
     OS="unknown"
@@ -60,52 +56,30 @@ detect_os() {
   info "Detected OS: ${BOLD}$OS${NC}"
 }
 
-# ── Install Node.js ───────────────────────────────────────────────────────────
-install_node() {
-  step "Checking Node.js"
-
-  if command -v node &>/dev/null; then
-    NODE_VER=$(node -v | sed 's/v//' | cut -d. -f1)
-    if [ "$NODE_VER" -ge "$NODE_MIN_VERSION" ] 2>/dev/null; then
-      ok "Node.js $(node -v) already installed"
-      return
-    else
-      warn "Node.js $(node -v) is too old (need v${NODE_MIN_VERSION}+). Upgrading..."
-    fi
-  else
-    info "Node.js not found. Installing..."
-  fi
-
+# ── Install build tools (needed by nvm on some systems) ──────────────────────
+install_build_tools() {
   case "$OS" in
     debian)
-      curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - 2>/dev/null
-      sudo apt-get install -y nodejs 2>/dev/null
-      ;;
-    rhel)
-      curl -fsSL https://rpm.nodesource.com/setup_22.x | sudo bash - 2>/dev/null
-      sudo yum install -y nodejs npm 2>/dev/null || sudo dnf install -y nodejs npm 2>/dev/null
-      ;;
-    arch)
-      sudo pacman -Sy --noconfirm nodejs npm 2>/dev/null
-      ;;
-    alpine)
-      sudo apk add --no-cache nodejs npm 2>/dev/null
-      ;;
-    macos)
-      if command -v brew &>/dev/null; then
-        brew install node 2>/dev/null
-      else
-        err "Homebrew not found. Install from https://nodejs.org/en/download/"
-        exit 1
+      if ! command -v curl &>/dev/null || ! command -v git &>/dev/null; then
+        info "Installing curl + git..."
+        sudo apt-get update -qq && sudo apt-get install -y -qq curl git
       fi
       ;;
-    *)
-      err "Unsupported OS. Please install Node.js v${NODE_MIN_VERSION}+ manually: https://nodejs.org"
-      exit 1
+    rhel)
+      sudo yum install -y curl git 2>/dev/null || sudo dnf install -y curl git 2>/dev/null || true
+      ;;
+    arch)
+      sudo pacman -Sy --noconfirm --needed curl git 2>/dev/null || true
+      ;;
+    alpine)
+      sudo apk add --no-cache curl git bash 2>/dev/null || true
+      ;;
+    macos)
+      if ! command -v git &>/dev/null; then
+        xcode-select --install 2>/dev/null || true
+      fi
       ;;
   esac
-
-  ok "Node.js $(node -v) installed"
 }
 
 # ── Install Git ───────────────────────────────────────────────────────────────
@@ -121,15 +95,59 @@ install_git() {
     rhel)    sudo yum install -y git || sudo dnf install -y git ;;
     arch)    sudo pacman -Sy --noconfirm git ;;
     alpine)  sudo apk add --no-cache git ;;
-    macos)   brew install git ;;
+    macos)   brew install git 2>/dev/null || xcode-select --install ;;
     *)       err "Please install Git manually: https://git-scm.com"; exit 1 ;;
   esac
   ok "Git installed"
 }
 
+# ── Install nvm + Node.js v24 LTS ────────────────────────────────────────────
+install_node() {
+  step "Installing Node.js via nvm"
+
+  # Load nvm if already present
+  export NVM_DIR="$NVM_DIR"
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" 2>/dev/null || true
+
+  # Install nvm if not present
+  if ! command -v nvm &>/dev/null 2>&1 && [ ! -s "$NVM_DIR/nvm.sh" ]; then
+    info "Installing nvm ${NVM_VERSION}..."
+    curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" | bash
+    export NVM_DIR="$NVM_DIR"
+    \. "$NVM_DIR/nvm.sh"
+    ok "nvm ${NVM_VERSION} installed"
+  else
+    ok "nvm already installed ($(nvm --version 2>/dev/null || echo 'loaded'))"
+  fi
+
+  # Check current Node.js version
+  if command -v node &>/dev/null; then
+    NODE_MAJOR=$(node -v | sed 's/v//' | cut -d. -f1)
+    if [ "${NODE_MAJOR:-0}" -ge 20 ]; then
+      ok "Node.js $(node -v) already satisfies requirement (>=20)"
+      return
+    else
+      warn "Node.js $(node -v) too old, upgrading to LTS..."
+    fi
+  fi
+
+  # Install latest LTS
+  info "Installing Node.js LTS (v24)..."
+  nvm install "$NODE_TARGET_LTS"
+  nvm alias default "$NODE_TARGET_LTS"
+  nvm use default
+
+  ok "Node.js $(node -v) installed  |  npm $(npm -v)"
+}
+
 # ── Install PM2 ───────────────────────────────────────────────────────────────
 install_pm2() {
   step "Checking PM2"
+
+  # Make sure nvm node is in PATH
+  export NVM_DIR="$NVM_DIR"
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" 2>/dev/null || true
+
   if command -v pm2 &>/dev/null; then
     ok "PM2 $(pm2 -v) already installed"
     return
@@ -145,7 +163,7 @@ clone_repo() {
 
   if [ -d "$APP_DIR/.git" ]; then
     info "Repository already exists at ${APP_DIR}. Pulling latest..."
-    git -C "$APP_DIR" fetch --quiet
+    git -C "$APP_DIR" fetch --quiet origin
     git -C "$APP_DIR" reset --hard origin/main --quiet
     ok "Repository updated to latest"
   else
@@ -158,48 +176,67 @@ clone_repo() {
 # ── Install dependencies ──────────────────────────────────────────────────────
 install_deps() {
   step "Installing Node.js dependencies"
+  export NVM_DIR="$NVM_DIR"
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" 2>/dev/null || true
   cd "$APP_DIR"
-  npm install --quiet --no-audit --no-fund 2>/dev/null
+  npm install --quiet --no-audit --no-fund
   ok "Dependencies installed"
 }
 
 # ── Build project ─────────────────────────────────────────────────────────────
 build_project() {
-  step "Building project"
+  step "Building project (TypeScript → JavaScript)"
+  export NVM_DIR="$NVM_DIR"
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" 2>/dev/null || true
   cd "$APP_DIR"
-  npm run build --quiet 2>/dev/null
+  npm run build
   ok "Build complete → dist/"
 }
 
 # ── Write PM2 ecosystem config ────────────────────────────────────────────────
 write_pm2_config() {
+  # Resolve the node binary from nvm so PM2 uses the correct version
+  export NVM_DIR="$NVM_DIR"
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" 2>/dev/null || true
+  NODE_BIN="$(command -v node)"
+
   cat > "$APP_DIR/ecosystem.config.cjs" << ECOSYSTEM
 module.exports = {
   apps: [
     {
       name: 'gitleakhunter',
-      script: 'npx',
-      args: 'wrangler pages dev dist --ip 0.0.0.0 --port ${APP_PORT}',
+      script: '${NODE_BIN}',
+      args: 'dist/server.js',
       cwd: '${APP_DIR}',
       env: {
         NODE_ENV: 'production',
-        PORT: ${APP_PORT}
+        HTTP_PORT: ${APP_PORT},
+        HTTPS_PORT: $((APP_PORT + 443)),
+        HOST: '0.0.0.0',
+        // SSL_MODE: 'auto'  → auto-detect Cloudflare cert → custom → Let's Encrypt → HTTP only
+        SSL_MODE: 'auto',
+        CF_ORIGIN_KEY:  '/etc/ssl/cloudflare/origin.key',
+        CF_ORIGIN_CERT: '/etc/ssl/cloudflare/origin.pem',
       },
       watch: false,
       instances: 1,
       exec_mode: 'fork',
       autorestart: true,
-      max_restarts: 10,
+      max_restarts: 15,
       restart_delay: 3000,
+      log_date_format: 'YYYY-MM-DD HH:mm:ss',
     }
   ]
 }
 ECOSYSTEM
+  ok "PM2 ecosystem config written"
 }
 
 # ── Start with PM2 ────────────────────────────────────────────────────────────
 start_pm2() {
   step "Starting GitLeakHunter with PM2"
+  export NVM_DIR="$NVM_DIR"
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" 2>/dev/null || true
   cd "$APP_DIR"
 
   # Kill any existing process on the port
@@ -216,14 +253,16 @@ start_pm2() {
   sleep 1
 
   pm2 start ecosystem.config.cjs --silent
-  sleep 4
+  sleep 3
 
   # Check health
-  if pm2 show gitleakhunter 2>/dev/null | grep -q "online"; then
-    ok "GitLeakHunter is running via PM2"
+  if curl -sf "http://localhost:${APP_PORT}/api/patterns" &>/dev/null; then
+    ok "GitLeakHunter is running on port ${APP_PORT}"
+  elif pm2 show gitleakhunter 2>/dev/null | grep -q "online"; then
+    ok "GitLeakHunter process is online (HTTP check pending)"
   else
-    warn "PM2 process may not be online yet. Checking logs..."
-    pm2 logs gitleakhunter --nostream --lines 10 2>/dev/null || true
+    warn "PM2 process may not be ready yet. Checking logs..."
+    pm2 logs gitleakhunter --nostream --lines 15 2>/dev/null || true
   fi
 
   # Save PM2 process list to survive reboots
@@ -233,67 +272,59 @@ start_pm2() {
 # ── Setup PM2 startup (auto-start on reboot) ─────────────────────────────────
 setup_startup() {
   step "Configuring auto-start on reboot"
-  if pm2 startup 2>&1 | grep -q "sudo"; then
-    STARTUP_CMD=$(pm2 startup 2>&1 | grep "sudo env" | head -1 | xargs)
+  local startup_out
+  startup_out=$(pm2 startup 2>&1 || true)
+  if echo "$startup_out" | grep -q "sudo"; then
+    STARTUP_CMD=$(echo "$startup_out" | grep "sudo env" | head -1)
     if [ -n "$STARTUP_CMD" ]; then
-      eval "$STARTUP_CMD" 2>/dev/null || warn "Could not set startup. Run manually: pm2 startup"
+      eval "$STARTUP_CMD" 2>/dev/null || warn "Could not set startup automatically. Run manually: pm2 startup"
     fi
   fi
   pm2 save --force --silent 2>/dev/null || true
   ok "Auto-start configured"
 }
 
-# ── Deploy to Cloudflare Pages ────────────────────────────────────────────────
-deploy_cloudflare() {
-  step "Deploying to Cloudflare Pages"
-
-  if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
-    err "CLOUDFLARE_API_TOKEN environment variable is not set."
-    echo -e "  ${YELLOW}Set it with:${NC}"
-    echo -e "  ${CYAN}export CLOUDFLARE_API_TOKEN=your_token_here${NC}"
-    echo -e "  ${CYAN}Then re-run: bash install.sh --deploy${NC}"
-    exit 1
-  fi
-
-  cd "$APP_DIR"
-
-  # Create project (ignore error if already exists)
-  npx wrangler pages project create gitleakhunter \
-    --production-branch main 2>/dev/null || true
-
-  # Deploy
-  npx wrangler pages deploy dist --project-name gitleakhunter
-  ok "Deployed to Cloudflare Pages!"
-}
-
-# ── Print final instructions ──────────────────────────────────────────────────
+# ── Print final summary ────────────────────────────────────────────────────────
 print_summary() {
+  # Get Node.js version
+  export NVM_DIR="$NVM_DIR"
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" 2>/dev/null || true
+
   echo ""
-  echo -e "${BOLD}${GREEN}╔════════════════════════════════════════════════╗${NC}"
-  echo -e "${BOLD}${GREEN}║       GitLeakHunter installed successfully!    ║${NC}"
-  echo -e "${BOLD}${GREEN}╚════════════════════════════════════════════════╝${NC}"
+  echo -e "${BOLD}${GREEN}╔════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${BOLD}${GREEN}║       GitLeakHunter installed successfully! 🎉         ║${NC}"
+  echo -e "${BOLD}${GREEN}╚════════════════════════════════════════════════════════╝${NC}"
   echo ""
-  echo -e "  ${BOLD}🌐 Local URL:${NC}    ${CYAN}http://localhost:${APP_PORT}${NC}"
+  echo -e "  ${BOLD}🌐 URL:${NC}          ${CYAN}http://localhost:${APP_PORT}${NC}"
   echo -e "  ${BOLD}📁 Install dir:${NC}  ${CYAN}${APP_DIR}${NC}"
+  echo -e "  ${BOLD}⚙️  Node.js:${NC}      ${CYAN}$(node -v 2>/dev/null || echo 'N/A') via nvm${NC}"
+  echo -e "  ${BOLD}📦 PM2:${NC}          ${CYAN}v$(pm2 -v 2>/dev/null || echo 'N/A')${NC}"
   echo ""
   echo -e "  ${BOLD}${YELLOW}Useful commands:${NC}"
-  echo -e "  ${CYAN}pm2 status${NC}                     — show running processes"
-  echo -e "  ${CYAN}pm2 logs gitleakhunter${NC}          — view live logs"
-  echo -e "  ${CYAN}pm2 restart gitleakhunter${NC}       — restart the app"
-  echo -e "  ${CYAN}pm2 stop gitleakhunter${NC}          — stop the app"
+  echo -e "  ${CYAN}pm2 status${NC}                      — show running processes"
+  echo -e "  ${CYAN}pm2 logs gitleakhunter${NC}           — view live logs"
+  echo -e "  ${CYAN}pm2 restart gitleakhunter${NC}        — restart the app"
+  echo -e "  ${CYAN}pm2 stop gitleakhunter${NC}           — stop the app"
   echo ""
   echo -e "  ${BOLD}${YELLOW}Update to latest version:${NC}"
   echo -e "  ${CYAN}cd ${APP_DIR} && git pull && npm install && npm run build && pm2 restart gitleakhunter${NC}"
   echo ""
-  echo -e "  ${BOLD}${YELLOW}Deploy to Cloudflare Pages:${NC}"
-  echo -e "  ${CYAN}export CLOUDFLARE_API_TOKEN=your_token${NC}"
-  echo -e "  ${CYAN}bash install.sh --deploy${NC}"
+  echo -e "  ${BOLD}${YELLOW}Enable HTTPS (Cloudflare Origin Cert):${NC}"
+  echo -e "  Edit ${CYAN}${APP_DIR}/ecosystem.config.cjs${NC} → set SSL_MODE + cert paths"
+  echo -e "  Then run ${CYAN}pm2 restart gitleakhunter${NC}"
+  echo ""
+  echo -e "  ${BOLD}${YELLOW}nvm — manage Node.js versions:${NC}"
+  echo -e "  ${CYAN}nvm ls${NC}                          — list installed versions"
+  echo -e "  ${CYAN}nvm install --lts${NC}               — install latest LTS"
+  echo -e "  ${CYAN}nvm use --lts${NC}                   — switch to LTS"
   echo ""
 }
 
 # ── Uninstall ─────────────────────────────────────────────────────────────────
 uninstall() {
   step "Uninstalling GitLeakHunter"
+  export NVM_DIR="$NVM_DIR"
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" 2>/dev/null || true
   pm2 delete gitleakhunter 2>/dev/null || true
   pm2 save --force --silent 2>/dev/null || true
   if [ -d "$APP_DIR" ]; then
@@ -305,18 +336,15 @@ uninstall() {
 }
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
-DEPLOY_MODE=false
 for arg in "$@"; do
   case "$arg" in
-    --deploy|-d)   DEPLOY_MODE=true ;;
-    --uninstall|-u) uninstall ;;
+    --uninstall|-u) detect_os; uninstall ;;
     --port=*)      APP_PORT="${arg#*=}" ;;
     --dir=*)       APP_DIR="${arg#*=}" ;;
     --help|-h)
       echo -e "${BOLD}Usage:${NC} bash install.sh [options]"
       echo ""
       echo -e "  ${CYAN}(no args)${NC}        Install & run locally with PM2 on port 3000"
-      echo -e "  ${CYAN}--deploy${NC}         Build + deploy to Cloudflare Pages"
       echo -e "  ${CYAN}--port=NNNN${NC}      Set custom port (default: 3000)"
       echo -e "  ${CYAN}--dir=/path${NC}      Set install directory (default: ~/gitleakhunter)"
       echo -e "  ${CYAN}--uninstall${NC}      Remove GitLeakHunter and stop PM2 process"
@@ -326,7 +354,7 @@ for arg in "$@"; do
       echo -e "  ${CYAN}bash install.sh${NC}"
       echo -e "  ${CYAN}bash install.sh --port=8080${NC}"
       echo -e "  ${CYAN}bash install.sh --dir=/opt/gitleakhunter${NC}"
-      echo -e "  ${CYAN}CLOUDFLARE_API_TOKEN=xxx bash install.sh --deploy${NC}"
+      echo -e "  ${CYAN}PORT=8080 bash install.sh${NC}"
       exit 0
       ;;
   esac
@@ -335,20 +363,16 @@ done
 # ── Main flow ─────────────────────────────────────────────────────────────────
 main() {
   detect_os
+  install_build_tools
   install_git
   install_node
   install_pm2
   clone_repo
   install_deps
   build_project
-
-  if [ "$DEPLOY_MODE" = true ]; then
-    deploy_cloudflare
-  else
-    start_pm2
-    setup_startup
-    print_summary
-  fi
+  start_pm2
+  setup_startup
+  print_summary
 }
 
 main "$@"
