@@ -483,6 +483,18 @@ const MAX_FILE_SIZE   = 100_000  // 100KB: secrets tidak ada di file besar, hema
 const GH_API_HEADERS  = { 'User-Agent': 'GitSecretScanner/3.0', Accept: 'application/vnd.github.v3+json' } as const
 const RAW_HEADERS     = { 'User-Agent': 'GitSecretScanner/3.0' } as const
 
+// Build headers, injecting Authorization if a token is provided
+function buildGhHeaders(token?: string): Record<string, string> {
+  const h: Record<string, string> = { ...GH_API_HEADERS }
+  if (token) h['Authorization'] = `token ${token}`
+  return h
+}
+function buildRawHeaders(token?: string): Record<string, string> {
+  const h: Record<string, string> = { ...RAW_HEADERS }
+  if (token) h['Authorization'] = `token ${token}`
+  return h
+}
+
 // Fetch with timeout — prevents indefinitely stalled requests from hanging the scan
 async function fetchWithTimeout(url: string, opts: RequestInit = {}, timeoutMs = 15000): Promise<Response> {
   const controller = new AbortController()
@@ -495,12 +507,13 @@ async function fetchWithTimeout(url: string, opts: RequestInit = {}, timeoutMs =
 }
 
 // Returns files + the resolved default branch (avoids a second API call in the route handler)
-async function fetchGithubTree(owner: string, repo: string): Promise<{ files: { path: string; size: number }[]; branch: string; stars: number; repoData: any }> {
+async function fetchGithubTree(owner: string, repo: string, token?: string): Promise<{ files: { path: string; size: number }[]; branch: string; stars: number; repoData: any }> {
   // Fetch repo metadata and two candidate branches ALL IN PARALLEL (3 requests simultaneously)
+  const ghH = buildGhHeaders(token)
   const [repoRes, mainTree, masterTree] = await Promise.all([
-    fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}`, { headers: GH_API_HEADERS }, 10000),
-    fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}/git/trees/main?recursive=1`, { headers: GH_API_HEADERS }, 20000),
-    fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}/git/trees/master?recursive=1`, { headers: GH_API_HEADERS }, 20000),
+    fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}`, { headers: ghH }, 10000),
+    fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}/git/trees/main?recursive=1`, { headers: ghH }, 20000),
+    fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}/git/trees/master?recursive=1`, { headers: ghH }, 20000),
   ])
 
   if (!repoRes.ok) throw new Error(`GitHub API error: ${repoRes.status} ${repoRes.statusText}`)
@@ -566,12 +579,12 @@ async function pLimitStream<T>(
 }
 
 // Fetch raw content directly with timeout — skips binary and oversized files
-async function fetchRawContent(owner: string, repo: string, branch: string, path: string, sizeHint = 0): Promise<string> {
+async function fetchRawContent(owner: string, repo: string, branch: string, path: string, sizeHint = 0, token?: string): Promise<string> {
   // Skip large files early based on tree size hint (avoids wasting a request)
   if (sizeHint > MAX_FILE_SIZE) return ''
   const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`
   try {
-    const res = await fetchWithTimeout(url, { headers: RAW_HEADERS }, 8000)
+    const res = await fetchWithTimeout(url, { headers: buildRawHeaders(token) }, 8000)
     if (!res.ok) return ''
     // Stream only up to MAX_FILE_SIZE bytes — avoid buffering huge responses
     const text = await res.text()
@@ -583,11 +596,11 @@ async function fetchRawContent(owner: string, repo: string, branch: string, path
   }
 }
 
-async function fetchCommitMessages(owner: string, repo: string): Promise<{ sha: string; msg: string }[]> {
+async function fetchCommitMessages(owner: string, repo: string, token?: string): Promise<{ sha: string; msg: string }[]> {
   try {
     const res = await fetchWithTimeout(
       `https://api.github.com/repos/${owner}/${repo}/commits?per_page=${MAX_COMMITS}`,
-      { headers: GH_API_HEADERS },
+      { headers: buildGhHeaders(token) },
       8000
     )
     if (!res.ok) return []
@@ -605,7 +618,7 @@ async function fetchCommitMessages(owner: string, repo: string): Promise<{ sha: 
 app.post('/api/scan/github', async (c) => {
   try {
     const body = await c.req.json()
-    const { url } = body as { url: string }
+    const { url, token } = body as { url: string; token?: string }
     if (!url) return c.json({ error: 'URL is required' }, 400)
 
     const parsed = parseGithubUrl(url)
@@ -613,12 +626,14 @@ app.post('/api/scan/github', async (c) => {
 
     const { owner, repo } = parsed
     const startTime = Date.now()
+    // Use provided token (strip whitespace for safety)
+    const ghToken = token?.trim() || undefined
 
     // ⚡ Fetch tree + commits IN PARALLEL — fetchGithubTree already returns branch+meta
     //    avoids 1 extra /repos API call compared to before
     const [treeResult, commits] = await Promise.all([
-      fetchGithubTree(owner, repo),
-      fetchCommitMessages(owner, repo),
+      fetchGithubTree(owner, repo, ghToken),
+      fetchCommitMessages(owner, repo, ghToken),
     ])
     const { files, branch, repoData } = treeResult
 
@@ -628,7 +643,7 @@ app.post('/api/scan/github', async (c) => {
     // ⚡ Fetch & scan files with 80 concurrent workers + stream results as they arrive
     //    (was 50, safe to raise because raw.githubusercontent.com has generous rate limits)
     const fileTasks = files.map(f => async () => {
-      const content = await fetchRawContent(owner, repo, branch, f.path, f.size)
+      const content = await fetchRawContent(owner, repo, branch, f.path, f.size, ghToken)
       if (!content) return [] as Finding[]
       scannedFiles.push(f.path)
       return scanText(content, f.path)
@@ -666,6 +681,7 @@ app.post('/api/scan/github', async (c) => {
         commits: commits.length,
         elapsed,
         platform: 'github',
+        tokenUsed: !!ghToken,
       },
       findings: deduped,
     })
@@ -1157,9 +1173,50 @@ app.get('/', (c) => {
           <i class="fas fa-search"></i> Scan
         </button>
       </div>
+      <!-- GitHub Token (opsional) -->
+      <div class="mt-3">
+        <div class="flex items-center gap-2 mb-1.5">
+          <label class="text-xs font-medium text-gray-400">
+            <i class="fas fa-key mr-1 text-yellow-500/70"></i>GitHub Token
+            <span class="text-gray-600 font-normal ml-1">(opsional — untuk repo private &amp; rate limit 5000/jam)</span>
+          </label>
+          <div class="flex-1"></div>
+          <button onclick="toggleGhTokenVisibility()" id="gh-token-toggle-btn"
+            class="text-xs text-gray-500 hover:text-gray-300 transition-colors" title="Show/hide token">
+            <i id="gh-token-eye" class="fas fa-eye-slash"></i>
+          </button>
+          <button onclick="clearGhToken()"
+            class="text-xs text-gray-500 hover:text-red-400 transition-colors hidden" id="gh-token-clear-btn" title="Hapus token">
+            <i class="fas fa-times"></i> Hapus
+          </button>
+        </div>
+        <div class="relative">
+          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600">
+            <i class="fas fa-lock text-xs"></i>
+          </span>
+          <input id="gh-token-input" type="password"
+            placeholder="ghp_xxxxxxxxxxxxxxxxxxxx  atau  github_pat_xxxxx"
+            class="w-full bg-[#0d1117] border border-[#30363d] rounded-xl pl-9 pr-28 py-2.5 text-sm text-white placeholder-gray-700 focus:outline-none focus:border-yellow-500/50 focus:ring-1 focus:ring-yellow-500/20 transition-all mono"
+            oninput="onGhTokenInput(this.value)"
+          />
+          <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+            <span id="gh-token-status" class="hidden text-xs px-2 py-0.5 rounded-full"></span>
+            <button onclick="saveGhToken()" id="gh-token-save-btn"
+              class="hidden text-xs bg-yellow-500/10 hover:bg-yellow-500/20 border border-yellow-500/30 text-yellow-400 hover:text-yellow-300 px-2.5 py-1 rounded-lg transition-all">
+              <i class="fas fa-save mr-1"></i>Simpan
+            </button>
+          </div>
+        </div>
+        <p id="gh-token-hint" class="text-xs text-gray-600 mt-1.5 hidden">
+          <i class="fas fa-circle-info mr-1 text-blue-500/50"></i>
+          Buat token di <a href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=GitLeakHunter" target="_blank" class="text-blue-400 hover:text-blue-300 underline">github.com/settings/tokens</a>
+          — centang scope <code class="text-yellow-400 bg-yellow-500/10 px-1 rounded">repo</code> untuk repo private.
+        </p>
+      </div>
       <p class="text-xs text-gray-600 mt-2">
         <i class="fas fa-info-circle mr-1"></i>
-        Scans all source files + 100 recent commits. High-value files (env, keys, certs) prioritised. No auth required for public repos.
+        Scans all source files + recent commits. High-value files (env, keys, certs) prioritised.
+        <span id="gh-rate-info" class="text-gray-700">Tanpa token: 60 req/jam. Dengan token: 5.000 req/jam.</span>
       </p>
       <!-- Example repos -->
       <div class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -2171,6 +2228,106 @@ function hideProgress(){
   hideBgToast();
 }
 
+// ─── GitHub Token Management ──────────────────────────────────────────────────
+const GH_TOKEN_KEY = 'gitleakhunter_gh_token';
+let ghTokenValue = '';
+
+function loadGhToken(){
+  try {
+    const saved = localStorage.getItem(GH_TOKEN_KEY);
+    if(saved){ ghTokenValue = saved; }
+  } catch {}
+  const inp = document.getElementById('gh-token-input');
+  if(inp && ghTokenValue){
+    inp.value = ghTokenValue;
+    updateGhTokenUI(ghTokenValue);
+  }
+}
+
+function saveGhToken(){
+  const inp = document.getElementById('gh-token-input');
+  if(!inp) return;
+  const val = inp.value.trim();
+  if(!val){ showToast('Token tidak boleh kosong', 'error'); return; }
+  // Basic format validation
+  if(!/^(ghp_|github_pat_|ghs_|gho_|ghu_|[0-9a-f]{40})/i.test(val)){
+    showToast('Format token tidak valid. Gunakan ghp_... atau github_pat_...', 'error');
+    return;
+  }
+  ghTokenValue = val;
+  try { localStorage.setItem(GH_TOKEN_KEY, val); } catch {}
+  updateGhTokenUI(val);
+  const saveBtn = document.getElementById('gh-token-save-btn');
+  if(saveBtn) saveBtn.classList.add('hidden');
+  showToast('Token disimpan! Rate limit: 5.000 req/jam', 'success');
+}
+
+function clearGhToken(){
+  ghTokenValue = '';
+  try { localStorage.removeItem(GH_TOKEN_KEY); } catch {}
+  const inp = document.getElementById('gh-token-input');
+  if(inp) inp.value = '';
+  updateGhTokenUI('');
+  showToast('Token dihapus', 'error');
+}
+
+function onGhTokenInput(val){
+  const saveBtn  = document.getElementById('gh-token-save-btn');
+  const hint     = document.getElementById('gh-token-hint');
+  const clearBtn = document.getElementById('gh-token-clear-btn');
+  const status   = document.getElementById('gh-token-status');
+  if(val.length > 0){
+    if(saveBtn)  saveBtn.classList.remove('hidden');
+    if(hint)     hint.classList.remove('hidden');
+    if(clearBtn) clearBtn.classList.remove('hidden');
+    if(status)   { status.classList.add('hidden'); }
+  } else {
+    if(saveBtn)  saveBtn.classList.add('hidden');
+    if(hint)     hint.classList.add('hidden');
+    if(clearBtn && !ghTokenValue) clearBtn.classList.add('hidden');
+  }
+}
+
+function updateGhTokenUI(val){
+  const status   = document.getElementById('gh-token-status');
+  const clearBtn = document.getElementById('gh-token-clear-btn');
+  const saveBtn  = document.getElementById('gh-token-save-btn');
+  const hint     = document.getElementById('gh-token-hint');
+  const rateInfo = document.getElementById('gh-rate-info');
+  if(val){
+    if(status){
+      status.classList.remove('hidden','bg-red-500/10','text-red-400','bg-gray-500/10','text-gray-400');
+      status.classList.add('bg-green-500/10','text-green-400');
+      status.textContent = '✓ Token aktif';
+    }
+    if(clearBtn) clearBtn.classList.remove('hidden');
+    if(saveBtn)  saveBtn.classList.add('hidden');
+    if(hint)     hint.classList.add('hidden');
+    if(rateInfo) rateInfo.textContent = '✓ Token aktif: 5.000 req/jam. Repo private diizinkan.';
+    if(rateInfo) { rateInfo.classList.remove('text-gray-700'); rateInfo.classList.add('text-green-600'); }
+  } else {
+    if(status){
+      status.classList.add('hidden');
+    }
+    if(clearBtn) clearBtn.classList.add('hidden');
+    if(rateInfo) rateInfo.textContent = 'Tanpa token: 60 req/jam. Dengan token: 5.000 req/jam.';
+    if(rateInfo) { rateInfo.classList.remove('text-green-600'); rateInfo.classList.add('text-gray-700'); }
+  }
+}
+
+function toggleGhTokenVisibility(){
+  const inp = document.getElementById('gh-token-input');
+  const eye = document.getElementById('gh-token-eye');
+  if(!inp) return;
+  if(inp.type === 'password'){
+    inp.type = 'text';
+    if(eye){ eye.classList.remove('fa-eye-slash'); eye.classList.add('fa-eye'); }
+  } else {
+    inp.type = 'password';
+    if(eye){ eye.classList.remove('fa-eye'); eye.classList.add('fa-eye-slash'); }
+  }
+}
+
 // ─── GitHub Scan ──────────────────────────────────────────────────────────────
 async function startGithubScan(){
   const url = document.getElementById('github-url').value.trim();
@@ -2203,11 +2360,13 @@ async function startGithubScan(){
   }, 700);
   
   const ctrl = activeScanController;
+  // Include token if available (from localStorage / input)
+  const tokenForScan = ghTokenValue || document.getElementById('gh-token-input')?.value?.trim() || '';
   try {
     const resp = await fetch('/api/scan/github', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, token: tokenForScan || undefined }),
       signal: ctrl ? ctrl.signal : undefined,
     });
     clearInterval(progressInterval);
@@ -2224,6 +2383,10 @@ async function startGithubScan(){
     notifyScanDone(ghLabel, data.findings?.length || 0);
     renderResults(data);
     showSendNowBtn();
+    // Show token usage feedback in meta bar
+    if(data.meta?.tokenUsed){
+      showToast('✓ Token GitHub digunakan — rate limit 5.000 req/jam', 'success');
+    }
     maybeAutoNotify();
   } catch(e){
     clearInterval(progressInterval);
@@ -2680,6 +2843,7 @@ document.addEventListener('click', function(e){
 // Init
 loadPatterns();
 loadTgConfig();
+loadGhToken();
 updateHistoryBadge();
 requestNotifPermission();
 </script>
