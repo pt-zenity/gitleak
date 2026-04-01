@@ -484,14 +484,18 @@ const GH_API_HEADERS  = { 'User-Agent': 'GitSecretScanner/3.0', Accept: 'applica
 const RAW_HEADERS     = { 'User-Agent': 'GitSecretScanner/3.0' } as const
 
 // Build headers, injecting Authorization if a token is provided
+// Fine-grained PATs (github_pat_*) require "Bearer" prefix; classic PATs (ghp_*) use "token"
+function getAuthPrefix(token: string): string {
+  return token.startsWith('github_pat_') ? 'Bearer' : 'token'
+}
 function buildGhHeaders(token?: string): Record<string, string> {
   const h: Record<string, string> = { ...GH_API_HEADERS }
-  if (token) h['Authorization'] = `token ${token}`
+  if (token) h['Authorization'] = `${getAuthPrefix(token)} ${token}`
   return h
 }
 function buildRawHeaders(token?: string): Record<string, string> {
   const h: Record<string, string> = { ...RAW_HEADERS }
-  if (token) h['Authorization'] = `token ${token}`
+  if (token) h['Authorization'] = `${getAuthPrefix(token)} ${token}`
   return h
 }
 
@@ -516,13 +520,41 @@ async function fetchGithubTree(owner: string, repo: string, token?: string): Pro
     fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}/git/trees/master?recursive=1`, { headers: ghH }, 20000),
   ])
 
-  if (!repoRes.ok) throw new Error(`GitHub API error: ${repoRes.status} ${repoRes.statusText}`)
+  if (!repoRes.ok) {
+    if (repoRes.status === 401) throw new Error('Token tidak valid atau kadaluarsa. Pastikan token memiliki scope "repo" atau "public_repo".')
+    if (repoRes.status === 403) throw new Error('Akses ditolak. Token mungkin perlu diotorisasi untuk SSO organisasi ini.')
+    if (repoRes.status === 404) throw new Error('Repository tidak ditemukan. Pastikan URL benar dan token memiliki akses ke repo ini.')
+    throw new Error(`GitHub API error: ${repoRes.status} ${repoRes.statusText}`)
+  }
   const repoData: any = await repoRes.json()
   const branch: string = repoData.default_branch ?? 'main'
 
   // Use the correct branch tree
   const treeRes = branch === 'master' ? masterTree : (mainTree.ok ? mainTree : masterTree)
-  if (!treeRes.ok) throw new Error(`GitHub tree API error: ${treeRes.status}`)
+  if (!treeRes.ok) {
+    // Fallback: try fetching the default_branch directly by name if neither main nor master worked
+    const branchRes = await fetchWithTimeout(
+      `https://api.github.com/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`,
+      { headers: ghH }, 20000
+    )
+    if (!branchRes.ok) throw new Error(`Branch '${branch}' tidak dapat diakses (${branchRes.status}). Pastikan token memiliki scope yang benar.`)
+    const fallbackData: any = await branchRes.json()
+    const files2: { path: string; size: number }[] = []
+    const highValue2: { path: string; size: number }[] = []
+    for (const item of fallbackData.tree ?? []) {
+      if (item.type !== 'blob') continue
+      if (SKIP_DIRS.test(item.path)) continue
+      if (item.size > MAX_FILE_SIZE) continue
+      const hasKnownExt = SCAN_EXTENSIONS.test(item.path)
+      const hasNoExt    = !item.path.includes('.') || /\/[^./]+$/.test(item.path)
+      const isAllowed   = hasKnownExt || (hasNoExt && NO_EXT_ALLOWLIST.test(item.path))
+      if (!isAllowed) continue
+      const entry = { path: item.path, size: item.size ?? 0 }
+      if (HIGH_VALUE_PATHS.test(item.path)) highValue2.push(entry)
+      else files2.push(entry)
+    }
+    return { files: [...highValue2, ...files2], branch, stars: repoData.stargazers_count ?? 0, repoData }
+  }
   const treeData: any = await treeRes.json()
 
   const files: { path: string; size: number }[] = []
@@ -1209,8 +1241,11 @@ app.get('/', (c) => {
         </div>
         <p id="gh-token-hint" class="text-xs text-gray-600 mt-1.5 hidden">
           <i class="fas fa-circle-info mr-1 text-blue-500/50"></i>
-          Buat token di <a href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=GitLeakHunter" target="_blank" class="text-blue-400 hover:text-blue-300 underline">github.com/settings/tokens</a>
-          — centang scope <code class="text-yellow-400 bg-yellow-500/10 px-1 rounded">repo</code> untuk repo private.
+          <strong class="text-gray-500">Classic PAT</strong> (<code class="text-yellow-400 bg-yellow-500/10 px-1 rounded">ghp_</code>):
+          <a href="https://github.com/settings/tokens/new?scopes=repo,read:org&description=GitLeakHunter" target="_blank" class="text-blue-400 hover:text-blue-300 underline">Buat di sini</a> — centang scope <code class="text-yellow-400 bg-yellow-500/10 px-1 rounded">repo</code>.
+          &nbsp;|&nbsp;
+          <strong class="text-gray-500">Fine-grained PAT</strong> (<code class="text-yellow-400 bg-yellow-500/10 px-1 rounded">github_pat_</code>):
+          <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" class="text-blue-400 hover:text-blue-300 underline">Buat di sini</a> — centang permission <code class="text-yellow-400 bg-yellow-500/10 px-1 rounded">Contents: Read</code>.
         </p>
       </div>
       <p class="text-xs text-gray-600 mt-2">
@@ -2295,15 +2330,18 @@ function updateGhTokenUI(val){
   const hint     = document.getElementById('gh-token-hint');
   const rateInfo = document.getElementById('gh-rate-info');
   if(val){
+    // Determine token type for user info
+    const isFineGrained = val.startsWith('github_pat_');
+    const tokenType = isFineGrained ? 'Fine-grained PAT' : 'Classic PAT';
     if(status){
       status.classList.remove('hidden','bg-red-500/10','text-red-400','bg-gray-500/10','text-gray-400');
       status.classList.add('bg-green-500/10','text-green-400');
-      status.textContent = '✓ Token aktif';
+      status.textContent = '\u2713 ' + tokenType + ' aktif';
     }
     if(clearBtn) clearBtn.classList.remove('hidden');
     if(saveBtn)  saveBtn.classList.add('hidden');
     if(hint)     hint.classList.add('hidden');
-    if(rateInfo) rateInfo.textContent = '✓ Token aktif: 5.000 req/jam. Repo private diizinkan.';
+    if(rateInfo) rateInfo.textContent = '\u2713 ' + tokenType + ' aktif: 5.000 req/jam. Repo private diizinkan.';
     if(rateInfo) { rateInfo.classList.remove('text-gray-700'); rateInfo.classList.add('text-green-600'); }
   } else {
     if(status){
